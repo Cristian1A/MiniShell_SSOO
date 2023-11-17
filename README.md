@@ -1,8 +1,8 @@
 # MiniShell_SSOO, GIS, 2023/2024, URJC
 
 # Autores
-   ·Andrei Vlad, Cristian (GIS)
    ·Limaylla Ticlavilca, David Paúl (GIS)
+   ·Vlad, Cristian Andrei (GIS)
 ## Descripción
 
 En esta práctica se abordará el problema de implementar un programa que actúe como intérprete de mandatos. 
