@@ -34,7 +34,7 @@
 
 int main(int argc, char const *argv[])
 {
-	// 
+	// Nothing to see here
 
     return 0;
 }
