@@ -27,14 +27,33 @@
 /*                                                              */
 /*              	3) Analyze that line with the parser        */
 /*                                                              */
-/*              	4) Executing the comands of the line        */
+/*              	4) Execute the comands of the line          */
 
 #include "parser.h"
-#define PROMPT "msh> "
+#include <stdlib.h>
+#include <stdio.h>
+#define PROMPT "msh>"
+#define MAX_LINE_SIZE 1024
 
 int main(int argc, char const *argv[])
 {
-	// Nothing to see here
+    char shell_line[MAX_LINE_SIZE];
+    tline* parsed_line;
 
+	// 1) Display the promt
+    printf("%s ", PROMPT);
+    // 2) Read a line from stdin
+    if(!fgets(shell_line, MAX_LINE_SIZE, stdin)){
+        printf("The line cannot be read\n");
+        exit(-1);
+    }
+    // 3) Analyze that line with the parser
+    parsed_line = tokenize(shell_line);
+
+    // Is tline null test
+    printf("%d", parsed_line->commands != NULL);
+
+    // 4) Execute the comands of the line
+    // TODO
     return 0;
 }
