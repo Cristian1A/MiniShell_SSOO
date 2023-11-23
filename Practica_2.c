@@ -50,8 +50,8 @@ int main(int argc, char const *argv[])
     // 3) Analyze that line with the parser
     parsed_line = tokenize(shell_line);
 
-    // Is tline null test
-    printf("%d", parsed_line->commands != NULL);
+    // Commands in line
+    printf("%d", parsed_line->ncommands);
 
     // 4) Execute the comands of the line
     // TODO
