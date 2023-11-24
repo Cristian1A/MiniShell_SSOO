@@ -43,18 +43,19 @@ int main(int argc, char const *argv[])
 {
     char shell_line[MAX_LINE_SIZE];
     tline* parsed_line;
-
-	// 1) Display the promt
-    printf("%s ", PROMPT);
-    // 2) Read a line from stdin
-    if(!fgets(shell_line, MAX_LINE_SIZE, stdin)){
-        printf("The line cannot be read\n");
-        exit(-1);
+    while (1){
+        // 1) Display the promt
+        printf("%s ", PROMPT);
+        // 2) Read a line from stdin
+        if(!fgets(shell_line, MAX_LINE_SIZE, stdin)){
+            printf("The line cannot be read\n");
+            exit(-1);
+        }
+        // 3) Analyze that line with the parser
+        parsed_line = tokenize(shell_line);
+        // 4) Execute the comands of the line
+        line_executer(parsed_line);
     }
-    // 3) Analyze that line with the parser
-    parsed_line = tokenize(shell_line);
-    // 4) Execute the comands of the line
-    line_executer(parsed_line);
     return 0;
 }
 
