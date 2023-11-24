@@ -30,7 +30,11 @@
 /*              	4) Execute the comands of the line          */
 
 #include "parser.h"
+#include <sys/types.h>
+#include <unistd.h>
 #include <stdlib.h>
+#include <errno.h>
+#include <string.h>
 #include <stdio.h>
 #define PROMPT "msh>"
 #define MAX_LINE_SIZE 1024
@@ -49,11 +53,33 @@ int main(int argc, char const *argv[])
     }
     // 3) Analyze that line with the parser
     parsed_line = tokenize(shell_line);
-
-    // Commands in line
-    printf("%d", parsed_line->ncommands);
-
     // 4) Execute the comands of the line
-    // TODO
+    line_executer(parsed_line);
+    return 0;
+}
+
+/*
+    Executes a specific command
+    Args:
+    - tcommand* command - command to execute
+*/
+int command_executer(tcommand* command){
+    return execv(command->filename, command->argv);
+}
+
+/*
+    Analyzes a parsed line
+    Args:
+    - tline* line - the parsed line
+*/
+int line_executer(tline* line){
+    if (line->ncommands == 1){
+        command_executer(line->commands);
+    }
+    
+    for (int i = 0; i < line->ncommands; i++){
+        printf("%s\n", line->commands[i].filename);
+    }
+    
     return 0;
 }
