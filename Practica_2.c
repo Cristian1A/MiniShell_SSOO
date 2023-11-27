@@ -39,6 +39,9 @@
 #define PROMPT "msh>"
 #define MAX_LINE_SIZE 1024
 
+// Compile with -> gcc -Wall Practica_2.c libparser.a -o Practica_2 -static
+// Token -> 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
+
 int main(int argc, char const *argv[])
 {
     char shell_line[MAX_LINE_SIZE];
@@ -54,7 +57,11 @@ int main(int argc, char const *argv[])
         // 3) Analyze that line with the parser
         parsed_line = tokenize(shell_line);
         // 4) Execute the comands of the line
-        line_executer(parsed_line);
+        if (line_executer(parsed_line) != 0){
+            printf("Error -> An error ocurred while executing the current line\n");
+            exit(-1);
+        }        
+        
     }
     return 0;
 }
@@ -76,11 +83,10 @@ int command_executer(tcommand* command){
 int line_executer(tline* line){
     if (line->ncommands == 1){
         command_executer(line->commands);
+    } else{
+        for (int i = 0; i < line->ncommands; i++){
+            printf("%s\n", line->commands[i].filename);
+        }
     }
-    
-    for (int i = 0; i < line->ncommands; i++){
-        printf("%s\n", line->commands[i].filename);
-    }
-    
     return 0;
 }
