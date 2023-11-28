@@ -42,6 +42,7 @@
 // Compile with -> gcc -Wall Practica_2.c libparser.a -o Practica_2 -static
 // Token -> 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
 
+
 int main(int argc, char const *argv[])
 {
     char shell_line[MAX_LINE_SIZE];
@@ -50,6 +51,7 @@ int main(int argc, char const *argv[])
         // 1) Display the promt
         printf("%s ", PROMPT);
         // 2) Read a line from stdin
+
         if(!fgets(shell_line, MAX_LINE_SIZE, stdin)){
             printf("The line cannot be read\n");
             exit(-1);
@@ -57,10 +59,12 @@ int main(int argc, char const *argv[])
         // 3) Analyze that line with the parser
         parsed_line = tokenize(shell_line);
         // 4) Execute the comands of the line
+        
         if (line_executer(parsed_line) != 0){
             printf("Error -> An error ocurred while executing the current line\n");
             exit(-1);
-        }        
+        }
+
         
     }
     return 0;
@@ -72,7 +76,12 @@ int main(int argc, char const *argv[])
     - tcommand* command - command to execute
 */
 int command_executer(tcommand* command){
-    return execv(command->filename, command->argv);
+    printf(command->filename);
+    if(execv(command->filename, command->argv) == -1){
+        printf("Error -> Executing command\n");
+        exit(-1);
+    }
+    return 0;
 }
 
 /*
@@ -81,11 +90,18 @@ int command_executer(tcommand* command){
     - tline* line - the parsed line
 */
 int line_executer(tline* line){
-    if (line->ncommands == 1){
-        command_executer(line->commands);
-    } else{
-        for (int i = 0; i < line->ncommands; i++){
-            printf("%s\n", line->commands[i].filename);
+    if (line->ncommands > 0){
+        int status;
+        if(fork() == 0){
+            if(command_executer(line->commands) != 0){
+                printf("Error -> Executing command in child\n");
+                exit(-1);
+            }
+        } else {
+            wait(&status);
+            if(WIFEXITED(status) && WEXITSTATUS(status) != 0){
+                printf("Error -> Child state is wrong\n");
+            }
         }
     }
     return 0;
