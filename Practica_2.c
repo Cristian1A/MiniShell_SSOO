@@ -36,11 +36,15 @@
 #include <errno.h>
 #include <string.h>
 #include <stdio.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+
 #define PROMPT "msh>"
 #define MAX_LINE_SIZE 1024
+#define REDIRECTION_SOURCES 3
 
+int line_executer(tline* line);
 // Compile with -> gcc -Wall Practica_2.c libparser.a -o Practica_2 -static
-// Token -> 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
 
 
 int main(int argc, char const *argv[])
@@ -75,12 +79,32 @@ int main(int argc, char const *argv[])
     Args:
     - tcommand* command - command to execute
 */
-int command_executer(tcommand* command){
-    printf(command->filename);
+int command_executer(tcommand* command, char** redirections){
+    //int descriptors[REDIRECTION_SOURCES];
+    int file_descriptor;
+    int default_file_descriptors[REDIRECTION_SOURCES] = {STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO};
+    for (int i = 0; i < REDIRECTION_SOURCES; i++){
+        if (redirections[i]){
+            // TODO ABRIR EL FICHERO Y CAMBIAR EL DESCRIPTOR DE FICHERO CON dup2
+            file_descriptor = open(redirections[i], O_RDONLY);
+            // An error ocurred when reading the file
+            if (file_descriptor == -1){
+                perror("open");
+                exit(-1);
+            }
+            // Dulpicating the file descriptor
+            if (dup2(file_descriptor, default_file_descriptors[i]) == -1){
+                perror("dup2");
+                exit(-1);
+            }
+        }
+    }
+    
     if(execv(command->filename, command->argv) == -1){
         printf("Error -> Executing command\n");
         exit(-1);
     }
+    printf("\n");
     return 0;
 }
 
@@ -92,8 +116,17 @@ int command_executer(tcommand* command){
 int line_executer(tline* line){
     if (line->ncommands > 0){
         int status;
+        char* file_name = line->commands->filename;
+        if (!file_name){
+            printf("The command does not exist\n");
+            exit(-1);
+        } else{
+            printf("%s\n", file_name);
+        }
+        
         if(fork() == 0){
-            if(command_executer(line->commands) != 0){
+            char* redirect[3] = {line->redirect_input, line->redirect_output, line->redirect_error};
+        if(command_executer(line->commands, redirect) != 0){
                 printf("Error -> Executing command in child\n");
                 exit(-1);
             }
