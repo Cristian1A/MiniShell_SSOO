@@ -46,17 +46,17 @@ int execute_command(tcommand* command, char** redirections){
                 if (i == 0){
                     file_descriptor[i] = open(redirections[i], O_RDONLY);
                 } else{
-                    file_descriptor[i] = open(redirections[i], O_WRONLY | O_CREAT | O_TRUNC);
+                    file_descriptor[i] = open(redirections[i], O_WRONLY | O_CREAT | O_TRUNC, 0666);
                 }
                 /* --- Checking if an error ocurred while opening the file --- */
-                if (file_descriptor == -1){
+                if (file_descriptor[i] == -1){
                     perror("Open");
-                    exit(-1);
+                    return -1;
                 }
                 /* --- Modifying the file descriptor --- */
                 if (dup2(file_descriptor[i], STDIN_FILENO * (i == 0) + STDOUT_FILENO * (i == 1) + STDERR_FILENO * (i == 2)) == -1){
                     perror("dup2");
-                    exit(-1);
+                    return -1;
                 }
             }
         }
@@ -89,7 +89,8 @@ int execute_line(tline* line){
     } else if (pid == 0){ /* --- Child process --- */
         int result;
         close(fd[0]);
-        result = (execute_command(line->commands, redirections) == NULL);
+        result = execute_command(line->commands, redirections);
+        /* --- 0 for success and any other value for failure --- */
         write(fd[1], &result, sizeof(result));
     } else{ /* --- Parent process --- */
         int result;
