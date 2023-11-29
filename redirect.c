@@ -36,35 +36,42 @@ int main(int argc, char const *argv[])
     return shell_status;
 }
 
-int execute_command(tcommand* command, char* input, char* output, char* error){
-    int file_descriptor;
-    // Comprobar si el comando existe
+int execute_command(tcommand* command, char** redirections){
+    int file_descriptor[REDIRECTION_SOURCES];
+    /* --- Checking whether the command exists or not --- */
     if (command->filename){
-        printf("El mandato existe\n");
-        // Verificar la redirección de entrada
-        if (input != NULL){
-            printf("%s\n", input);
-            file_descriptor = open(input, O_RDONLY);
-            if (file_descriptor == -1){
-                perror("open");
-                exit(-1);
+        /* --- Cheking file redirections --- */
+        for (int i = 0; i < REDIRECTION_SOURCES; i++){
+            if (redirections[i]){
+                if (i == 0){
+                    file_descriptor[i] = open(redirections[i], O_RDONLY);
+                } else{
+                    file_descriptor[i] = open(redirections[i], O_WRONLY | O_CREAT | O_TRUNC);
+                }
+                /* --- Checking if an error ocurred while opening the file --- */
+                if (file_descriptor == -1){
+                    perror("Open");
+                    exit(-1);
+                }
+                /* --- Modifying the file descriptor --- */
+                if (dup2(file_descriptor[i], STDIN_FILENO * (i == 0) + STDOUT_FILENO * (i == 1) + STDERR_FILENO * (i == 2)) == -1){
+                    perror("dup2");
+                    exit(-1);
+                }
             }
-            printf("Se ha podido abrir el fichero %d\n", file_descriptor);
-            // Modificar descriptor de stdin
-            if (dup2(file_descriptor, STDIN_FILENO) == -1){
-                perror("dup2");
-                exit(-1);
-            }
-            printf("Se ha redirigido la entrada correctamente\n");
         }
-        // Ejecutar comando
         return execv(command->filename, command->argv);
-    }
-    printf("El mandato no existe\n");
+    } /* --- The command does not exist --- */
     return -1;
 }
 
 int execute_line(tline* line){
+    char* redirections[REDIRECTION_SOURCES] = {
+        line->redirect_input,
+        line->redirect_output,
+        line->redirect_error
+    };
+
     // Create a son proccess
     int status;
     int fd[2];
@@ -82,7 +89,7 @@ int execute_line(tline* line){
     } else if (pid == 0){ /* --- Child process --- */
         int result;
         close(fd[0]);
-        result = (execute_command(line->commands, line->redirect_input, line->redirect_output, line->redirect_error) == NULL);
+        result = (execute_command(line->commands, redirections) == NULL);
         write(fd[1], &result, sizeof(result));
     } else{ /* --- Parent process --- */
         int result;
