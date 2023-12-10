@@ -44,7 +44,7 @@
 #define MAX_LINE_SIZE 1024
 #define FILE_DESCRIPTORS 3
 
-// Compile with -> gcc -Wall minishell.c libparser.a -o minishell -static
+// Compile with -> gcc -Wall minishell2.c libparser.a -o minishell2 -static
 
 int upper_executer(tline* line);
 int executer(int nprocesses, tcommand* command, int* new_fds, int* old_fds, int first);
@@ -208,6 +208,7 @@ int executer(int nprocesses, tcommand* command, int* new_fds, int* old_fds, int 
         
         close(comunication_pipe[1]);
         printf("QUE PASA PIPA\n");
+        close(new_fds[0]);
         execv(command->filename, command->argv);
 
         // Si falla y error_fd != NULL escribir en el file asociado al descriptor de fichero
@@ -215,15 +216,15 @@ int executer(int nprocesses, tcommand* command, int* new_fds, int* old_fds, int 
         exit(EXIT_FAILURE);
     } else{
         waitpid(pid, NULL, 0);
-        int new_input = comunication_pipe[1];
-        printf("NEW INPUT FD%d\n", new_input);
-        close(new_fds[0]);
-        close(comunication_pipe[0]);
-        if (nprocesses - 1 > 0){
-            new_fds[0] = new_input;
-            executer(nprocesses - 1, command + 1, new_fds, old_fds, 0);
-        }
+
         close(comunication_pipe[1]);
+        if (nprocesses - 1 > 0){
+            new_fds[0] = comunication_pipe[0];
+            executer(nprocesses - 1, command + 1, new_fds, old_fds, 0);
+        } else {
+            // Cerrar el descriptor de lectura de la tubería si no hay más comandos
+            close(comunication_pipe[0]);
+        }
         return 0;
     }
 }
