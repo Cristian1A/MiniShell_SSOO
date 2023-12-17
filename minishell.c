@@ -52,6 +52,8 @@ int foreground_executer(tline* line);
 int fg_multicommand(tline* line);
 int fg_unicommand(tcommand* command, char* input, char* output, char* error);
 int fg_multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name);
+int secondChance(char* options);
+int cdOperation(char** listOption, int listSize);
 
 int main(int argc, char const *argv[])
 {
@@ -85,12 +87,14 @@ int main(int argc, char const *argv[])
         /*             <3>              */
         /*   Analyze with the parser    */
         /********************************/
-        parsed_line = tokenize(shell_line);
-        /********************************/
-        /*             <4>              */
-        /*     Execute the comands      */
-        /********************************/
-        shell_status = upper_executer(parsed_line);
+        if (secondChance(shell_line) == 2){
+            parsed_line = tokenize(shell_line);
+            /********************************/
+            /*             <4>              */
+            /*     Execute the comands      */
+            /********************************/
+            shell_status = upper_executer(parsed_line);
+        }
     }
     return shell_status;
 }
@@ -311,5 +315,103 @@ int fg_multicommand_executer(int command_counter, tcommand* command, int input_f
             command_counter -= 1;
         }
     }
+    return 0;
+}
+
+int secondChance(char* options){
+    char delimitador[] = " ";
+    char* token = strtok(options, delimitador);
+    char** listaOption = NULL; // Lista dinámica
+    int tamano = 0; // Tamaño de la lista dinámica
+
+    while (token != NULL) {
+        listaOption = realloc(listaOption, (tamano + 1) * sizeof(char*));
+
+        if (listaOption == NULL) {
+            fprintf(stderr, "Error al asignar memoria dinámica\n");
+            exit(EXIT_FAILURE);
+        }
+
+        listaOption[tamano] = strdup(token);
+
+        if (listaOption[tamano] == NULL) {
+            fprintf(stderr, "Error al duplicar la cadena\n");
+            exit(EXIT_FAILURE);
+        }
+
+        tamano++;
+        token = strtok(NULL, delimitador);
+    }
+    printf("comando ejecutado: %s\n", listaOption[0]);
+    if(strcmp(listaOption[0], "cd") != 0 && strcmp(listaOption[0], "exit") != 0){
+        // Liberar la memoria asignada
+        for (int i = 0; i < tamano; ++i) 
+            free(listaOption[i]);
+        
+        free(listaOption);
+        return 2;
+    }else{
+        printf("tamaño del string: %i\n", tamano);
+        printf("comando ejecutado: %s\n", listaOption[0]);
+        if (tamano > 0) {
+            if (strcmp(listaOption[0], "cd") == 0) {
+                printf("ejecutando cdOperation..\n");
+                cdOperation(listaOption, tamano);
+            }else if (strcmp(listaOption[0], "exit")){
+                printf("ejecutando exit..\n");
+                exit(1);
+                //printf("error");
+            }
+        }
+
+        // Liberar la memoria asignada
+        for (int i = 0; i < tamano; ++i) 
+            free(listaOption[i]);
+    
+        free(listaOption);
+
+        return 0;
+    }
+}
+
+int cdOperation(char** listOption, int listSize){
+    char *dir;
+    //char buffer[512];
+
+    if (listSize > 2) {
+        //getcwd(buffer, sizeof(buffer));
+        //fprintf(stderr, "Uso: %s directorio\n", buffer);
+        fprintf(stderr, "demasiados argumentos");
+        return 1;
+    }
+
+    if (listSize == 1) {
+        dir = getenv("HOME");
+        if (dir == NULL) {
+            fprintf(stderr, "No existe la variable $HOME\n");
+            return 1;
+        }
+    } else {
+        if(strcmp(listOption[1], "..") == 0){
+            dir = "..";
+        }else{
+            dir = listOption[1];
+        }
+    }
+    //getcwd(buffer, sizeof(buffer));
+    //printf("Uso: %s directorio\n", buffer);
+    if (chdir(dir) != 0) {
+        printf("dir: %s\n", dir);
+        fprintf(stderr, "Error al cambiar de directorio: %s\n", strerror(errno));
+        return 1;
+    }
+
+    /*if (getcwd(buffer, sizeof(buffer)) != NULL) {
+        printf("El directorio actual es: %s\n", buffer);
+    } else {
+        perror("getcwd");
+        return 1;
+    }*/
+
     return 0;
 }
