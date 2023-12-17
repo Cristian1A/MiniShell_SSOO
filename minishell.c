@@ -52,8 +52,8 @@ int foreground_executer(tline* line);
 int fg_multicommand(tline* line);
 int fg_unicommand(tcommand* command, char* input, char* output, char* error);
 int fg_multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name);
-int secondChance(char* options);
-int cdOperation(char** listOption, int listSize);
+int InternOp(char* shell_line);
+int changeD(int counter, char** words);
 
 int main(int argc, char const *argv[])
 {
@@ -83,11 +83,12 @@ int main(int argc, char const *argv[])
             printf("The line cannot be read\n");
             exit(-1);
         }
-        /********************************/
-        /*             <3>              */
-        /*   Analyze with the parser    */
-        /********************************/
-        if (secondChance(shell_line) == 2){
+        if(InternOp(shell_line) == 2){
+            /********************************/
+            /*             <3>              */
+            /*   Analyze with the parser    */
+            /********************************/
+        
             parsed_line = tokenize(shell_line);
             /********************************/
             /*             <4>              */
@@ -318,100 +319,106 @@ int fg_multicommand_executer(int command_counter, tcommand* command, int input_f
     return 0;
 }
 
-int secondChance(char* options){
-    char delimitador[] = " ";
-    char* token = strtok(options, delimitador);
-    char** listaOption = NULL; // Lista dinámica
-    int tamano = 0; // Tamaño de la lista dinámica
+
+int InternOp(char* shell_line){
+    char miString[1024];
+    strcpy(miString, shell_line);
+    // Declarar un puntero a un array de strings para almacenar las palabras
+    char **miArray = NULL;
+
+    // Utilizar strtok para contar la cantidad de palabras en el string
+    char *token = strtok(miString, " ");
+    int numPalabras = 0;
 
     while (token != NULL) {
-        listaOption = realloc(listaOption, (tamano + 1) * sizeof(char*));
-
-        if (listaOption == NULL) {
-            fprintf(stderr, "Error al asignar memoria dinámica\n");
-            exit(EXIT_FAILURE);
-        }
-
-        listaOption[tamano] = strdup(token);
-
-        if (listaOption[tamano] == NULL) {
-            fprintf(stderr, "Error al duplicar la cadena\n");
-            exit(EXIT_FAILURE);
-        }
-
-        tamano++;
-        token = strtok(NULL, delimitador);
+        numPalabras++;
+        token = strtok(NULL, " ");
     }
-    printf("comando ejecutado: %s\n", listaOption[0]);
-    if(strcmp(listaOption[0], "cd") != 0 && strcmp(listaOption[0], "exit") != 0){
-        // Liberar la memoria asignada
-        for (int i = 0; i < tamano; ++i) 
-            free(listaOption[i]);
-        
-        free(listaOption);
-        return 2;
+
+    // Asignar memoria para el array de strings
+    miArray = (char **)malloc(numPalabras * sizeof(char *));
+
+    // Reiniciar el string para volver a utilizar strtok
+    strcpy(miString, shell_line);
+
+    // Utilizar strtok para almacenar cada palabra en el array de strings
+    token = strtok(miString, " ");
+    int indice = 0;
+
+    while (token != NULL) {
+        // Asignar memoria para la palabra y copiarla al array
+        miArray[indice] = strdup(token);
+
+        // Obtener la siguiente palabra
+        token = strtok(NULL, " ");
+
+        // Incrementar el índice
+        indice++;
+    }
+    if (strncmp(miArray[0], "cd", strlen(miArray[0])-1) == 0) {
+        changeD(numPalabras, miArray);
+    }else if(strncmp(miArray[0], "exit", strlen("exit")) == 0){
+        //printf("Saliendo con éxito\n");
+        exit(1);
     }else{
-        printf("tamaño del string: %i\n", tamano);
-        printf("comando ejecutado: %s\n", listaOption[0]);
-        if (tamano > 0) {
-            if (strcmp(listaOption[0], "cd") == 0) {
-                printf("ejecutando cdOperation..\n");
-                cdOperation(listaOption, tamano);
-            }else if (strcmp(listaOption[0], "exit")){
-                printf("ejecutando exit..\n");
-                exit(1);
-                //printf("error");
-            }
+        //printf("No es una operación cd ni exit\n");
+        // Liberar la memoria asignada para cada palabra y el array de strings
+        for (int i = 0; i < numPalabras; i++) {
+            free(miArray[i]);
         }
+        free(miArray);
+        return 2;
+    }
 
-        // Liberar la memoria asignada
-        for (int i = 0; i < tamano; ++i) 
-            free(listaOption[i]);
+    // Liberar la memoria asignada para cada palabra y el array de strings
+    for (int i = 0; i < numPalabras; i++) {
+        free(miArray[i]);
+    }
     
-        free(listaOption);
+    free(miArray);
 
-        return 0;
-    }
-}
-
-int cdOperation(char** listOption, int listSize){
-    char *dir;
-    //char buffer[512];
-
-    if (listSize > 2) {
-        //getcwd(buffer, sizeof(buffer));
-        //fprintf(stderr, "Uso: %s directorio\n", buffer);
-        fprintf(stderr, "demasiados argumentos");
-        return 1;
-    }
-
-    if (listSize == 1) {
-        dir = getenv("HOME");
-        if (dir == NULL) {
-            fprintf(stderr, "No existe la variable $HOME\n");
-            return 1;
-        }
-    } else {
-        if(strcmp(listOption[1], "..") == 0){
-            dir = "..";
-        }else{
-            dir = listOption[1];
-        }
-    }
-    //getcwd(buffer, sizeof(buffer));
-    //printf("Uso: %s directorio\n", buffer);
-    if (chdir(dir) != 0) {
-        printf("dir: %s\n", dir);
-        fprintf(stderr, "Error al cambiar de directorio: %s\n", strerror(errno));
-        return 1;
-    }
-
-    /*if (getcwd(buffer, sizeof(buffer)) != NULL) {
-        printf("El directorio actual es: %s\n", buffer);
-    } else {
-        perror("getcwd");
-        return 1;
-    }*/
+    //printf("------------------%s\n", miStringOriginal);
 
     return 0;
+}
+
+int changeD(int counter, char** words){
+    char *dir;
+	char buffer[512];
+	
+    printf( "El directorio ANTERIOR es: %s\n", getcwd(buffer, sizeof(buffer)));
+
+	if(counter > 2)
+	{
+	  fprintf(stderr, "Numero de argumentos inválido.\n");
+	  return 1;
+	}
+	
+	if (counter == 1)
+	{
+		dir = getenv("HOME");
+		if(dir == NULL)
+		{
+		  perror("No existe la variable $HOME\n");
+          return 1;
+		}
+	}
+	else 
+	{
+        //Elimina los saltos de línea del directorio al que se quiere cambiar
+        if (words[1][strlen(words[1]) - 1] == '\n') {
+        words[1][strlen(words[1]) - 1] = '\0';
+        }
+		dir = words[1];
+	}
+	
+	// Comprobar si es un directorio
+	if (chdir(dir) != 0) {
+		perror("Error al cambiar de directorio\n");
+        printf( "El directorio actual es: %s\n", getcwd(buffer, sizeof(buffer)));
+        return 1;
+    }
+	printf( "El directorio ACTUAL es: %s\n", getcwd(buffer, sizeof(buffer)));
+
+	return 0;
 }
