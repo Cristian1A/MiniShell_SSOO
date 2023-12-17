@@ -149,11 +149,9 @@ int executer(int nprocesses, tcommand* command, int* new_fds, int* old_fds, int 
         perror("fork");
         exit(EXIT_FAILURE);
     } else if (pid == 0){
-        printf("ACCEDIENDO AL HIJO\n"); /**/
         for (int i = 0; i < 3; i++){
             printf("%d\n", new_fds[i]);
         }
-        printf("-----\n");
         // Cerrar extremo de lectura
         close(comunication_pipe[0]);
         /*
@@ -167,9 +165,11 @@ int executer(int nprocesses, tcommand* command, int* new_fds, int* old_fds, int 
             if (new_fds[0] != old_fds[0]){
                 /* --- REDIRECT TO FILE --- */
                 dup2(new_fds[0], STDIN_FILENO);
+                close(new_fds[0]);
             } else{
                 /* --- REDIRECT TO KEYBOARD --- */
                 dup2(old_fds[0], STDIN_FILENO);
+                close(old_fds[0]);
             }
         } else{
             /* --- REDIRECT TO FILE --- */
@@ -189,10 +189,13 @@ int executer(int nprocesses, tcommand* command, int* new_fds, int* old_fds, int 
             } else{
                 /* --- REDIRECT TO SCREEN --- */
                 dup2(old_fds[1], STDOUT_FILENO);
+                close(old_fds[1]);
+                old_fds[1] = dup(STDOUT_FILENO);
             }
         } else{
             /* --- REDIRECT TO PIPE --- */
             dup2(comunication_pipe[1], STDOUT_FILENO);
+            close(comunication_pipe[1]);
         }
         /*
             Redirigir STDERR:
@@ -201,14 +204,14 @@ int executer(int nprocesses, tcommand* command, int* new_fds, int* old_fds, int 
         if (new_fds[2] != old_fds[2]){
             /* --- REDIRECT TO FILE --- */
             dup2(new_fds[2], STDERR_FILENO);
+            close(new_fds[2]);
         } else{
             /* --- REDIRECT TO SCREEN --- */
             dup2(old_fds[2], STDERR_FILENO);
+            close(old_fds[2]);
+            old_fds[2] = dup(STDERR_FILENO);
         }
-        
-        close(comunication_pipe[1]);
-        printf("QUE PASA PIPA\n");
-        close(new_fds[0]);
+
         execv(command->filename, command->argv);
 
         // Si falla y error_fd != NULL escribir en el file asociado al descriptor de fichero
@@ -216,15 +219,15 @@ int executer(int nprocesses, tcommand* command, int* new_fds, int* old_fds, int 
         exit(EXIT_FAILURE);
     } else{
         waitpid(pid, NULL, 0);
-
+        int new_input = comunication_pipe[0];
+        printf("NEW INPUT FD%d\n", new_input);
         close(comunication_pipe[1]);
         if (nprocesses - 1 > 0){
-            new_fds[0] = comunication_pipe[0];
+            new_fds[0] = new_input;
             executer(nprocesses - 1, command + 1, new_fds, old_fds, 0);
-        } else {
-            // Cerrar el descriptor de lectura de la tubería si no hay más comandos
-            close(comunication_pipe[0]);
         }
+        close(new_fds[0]);
+        close(comunication_pipe[0]);
         return 0;
     }
 }
