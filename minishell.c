@@ -47,7 +47,11 @@
 // Compile with -> gcc -Wall minishell.c libparser.a -o minishell -static
 
 int upper_executer(tline* line);
-int executer(int nprocesses, tcommand* command, int* new_fds, int* old_fds, int first);
+int background_executer(tline* line);
+int foreground_executer(tline* line);
+int fg_multicommand(tline* line);
+int fg_unicommand(tcommand* command, char* input, char* output, char* error);
+int fg_multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name);
 
 int main(int argc, char const *argv[])
 {
@@ -92,48 +96,32 @@ int main(int argc, char const *argv[])
 }
 
 int upper_executer(tline* line){
-    /* --- ORIGINAL FILE DESCRIPTORS CLONED --- */
-    int original_fds[FILE_DESCRIPTORS] = {
-        dup(STDIN_FILENO), dup(STDOUT_FILENO), dup(STDERR_FILENO)
-    };
-    /* --- AUXILIARY FILE DESCRIPTORS --- */
-    int new_fds[FILE_DESCRIPTORS] = {
-        original_fds[0], original_fds[1], original_fds[2]
-    };
-    /* --- REDIRECTION SOURCES --- */
-    char* redirection_src[FILE_DESCRIPTORS] = {
-        line->redirect_input, line->redirect_output, line->redirect_error
-    };
-    for (int i = 0; i < FILE_DESCRIPTORS; i++){
-        /* --- Cheking if there is a file for redirection --- */
-        if (redirection_src[i]){
-            /* --- INPUT REDIRECTION --- */
-            if (i == 0){
-                new_fds[i] = open(redirection_src[i], O_RDONLY); 
-            } else{ /* --- OUTPUT or ERROR REDIRECTION --- */
-                new_fds[i] = open(redirection_src[i], O_WRONLY | O_CREAT | O_TRUNC, 0666); 
-            }
-            /* --- Crecking error while opening file --- */
-            if (new_fds[i] == -1){
-                perror("open");
-                exit(EXIT_FAILURE);
-            }
-            printf("SE HA DETECTADO UNA REDIRECCIÓN\n"); /**/
-        }
+    if (line->background){
+        return background_executer(line);
+    } else{
+        return foreground_executer(line);
     }
-    /* --- Executing the line --- */
-    int aux = executer(line->ncommands, line->commands, new_fds, original_fds, 1);
-    /* --- Closing file descriptors --- */
-    for (int i = 0; i < FILE_DESCRIPTORS; i++){
-        close(new_fds[i]);
-    }
-    dup2(original_fds[0], STDIN_FILENO);
-    dup2(original_fds[1], STDOUT_FILENO);
-    dup2(original_fds[2], STDERR_FILENO);
-    return aux;
 }
 
-int executer(int nprocesses, tcommand* command, int* new_fds, int* old_fds, int first){
+int background_executer(tline* line){
+    return 0;
+}
+
+int foreground_executer(tline* line){
+    switch (line->ncommands){
+    case 0:
+        return -1;
+        break;
+    case 1:
+        return fg_unicommand(line->commands, line->redirect_input, line->redirect_output, line->redirect_error);
+        break;
+    default:
+        return fg_multicommand(line);
+        break;
+    }
+}
+
+int fg_unicommand(tcommand* command, char* input, char* output, char* error){
     int comunication_pipe[2];
     pid_t pid;
 
@@ -149,81 +137,179 @@ int executer(int nprocesses, tcommand* command, int* new_fds, int* old_fds, int 
         perror("fork");
         exit(EXIT_FAILURE);
     } else if (pid == 0){
-        printf("ACCEDIENDO AL HIJO\n"); /**/
-        for (int i = 0; i < 3; i++){
-            printf("%d\n", new_fds[i]);
-        }
-        printf("-----\n");
+        int input_fd; int output_fd; int error_fd;
         // Cerrar extremo de lectura
         close(comunication_pipe[0]);
-        /*
-            Redirigir STDIN:
-            1) A ningún lado, si nprocesses == 1 y output_fd == STDOUT_FILENO
-            2) A ningún lado, si no es el primer mandato
-            3) A fichero, si nprocesses == 1 y output_fd != STDOUT_FILENO
-        */
-        printf("REDIRECCIÓN DE ENTRADA\n");
-        if (first){
-            if (new_fds[0] != old_fds[0]){
-                /* --- REDIRECT TO FILE --- */
-                dup2(new_fds[0], STDIN_FILENO);
-            } else{
-                /* --- REDIRECT TO KEYBOARD --- */
-                dup2(old_fds[0], STDIN_FILENO);
+        // Redirección de entrada
+        if (input){
+            input_fd = open(input, O_RDONLY);
+            /* --- Crecking error while opening file --- */
+            if (input_fd == -1){
+                perror("open");
+                exit(EXIT_FAILURE);
             }
-        } else{
-            /* --- REDIRECT TO FILE --- */
-            dup2(new_fds[0], STDIN_FILENO);
+            dup2(input_fd, STDIN_FILENO);
+            close(input_fd);
         }
-        printf("REDIRECCIÓN DE ENTRADA: RESULTADO %d\n", new_fds[0]);
-        /*
-            Redirigir STDOUT:
-            1) A ningún lado, si nprocesses == 1 y output_fd == STDOUT_FILENO
-            2) A la pipe, si nprocesses > 1
-            3) A fichero, si nprocesses == 1 y output_fd != STDOUT_FILENO
-        */
-        if (nprocesses == 1){
-            if (new_fds[1] != old_fds[1]){
-                /* --- REDIRECT TO FILE --- */
-                dup2(new_fds[1], STDOUT_FILENO);
-            } else{
-                /* --- REDIRECT TO SCREEN --- */
-                dup2(old_fds[1], STDOUT_FILENO);
+        // Redirección de salida
+        if (output){
+            output_fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
+            /* --- Crecking error while opening file --- */
+            if (output_fd == -1){
+                perror("open");
+                exit(EXIT_FAILURE);
             }
-        } else{
-            /* --- REDIRECT TO PIPE --- */
-            dup2(comunication_pipe[1], STDOUT_FILENO);
+            dup2(output_fd, STDOUT_FILENO);
+            close(output_fd);
         }
-        /*
-            Redirigir STDERR:
-            1) A file si error_fd != STDERR_FILENO
-        */
-        if (new_fds[2] != old_fds[2]){
-            /* --- REDIRECT TO FILE --- */
-            dup2(new_fds[2], STDERR_FILENO);
-        } else{
-            /* --- REDIRECT TO SCREEN --- */
-            dup2(old_fds[2], STDERR_FILENO);
+        // Redirección de error
+        if (error){
+            error_fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
+            /* --- Crecking error while opening file --- */
+            if (error_fd == -1){
+                perror("open");
+                exit(EXIT_FAILURE);
+            }
+            dup2(error_fd, STDERR_FILENO);
+            close(error_fd);
         }
-        
-        close(comunication_pipe[1]);
-        printf("QUE PASA PIPA\n");
         execv(command->filename, command->argv);
-
         // Si falla y error_fd != NULL escribir en el file asociado al descriptor de fichero
         printf("execv: Bad address\n");
         exit(EXIT_FAILURE);
     } else{
         waitpid(pid, NULL, 0);
-        int new_input = comunication_pipe[1];
-        printf("NEW INPUT FD%d\n", new_input);
-        close(new_fds[0]);
-        close(comunication_pipe[0]);
-        if (nprocesses - 1 > 0){
-            new_fds[0] = new_input;
-            executer(nprocesses - 1, command + 1, new_fds, old_fds, 0);
-        }
         close(comunication_pipe[1]);
+        close(comunication_pipe[0]);
         return 0;
     }
+}
+
+int fg_multicommand(tline* line){
+    // Open redirection files
+    int input_fd = dup(STDIN_FILENO);
+    int output_fd = dup(STDOUT_FILENO);
+    int error_fd = dup(STDERR_FILENO);
+    // Redirección de entrada
+    if (line->redirect_input){
+        input_fd = open(line->redirect_input, O_RDONLY);
+        /* --- Crecking error while opening file --- */
+        if (input_fd == -1){
+            perror("open");
+            exit(EXIT_FAILURE);
+        }
+    }
+    // Redirección de salida
+    if (line->redirect_output){
+        output_fd = open(line->redirect_output, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
+        /* --- Crecking error while opening file --- */
+        if (output_fd == -1){
+            perror("open");
+            exit(EXIT_FAILURE);
+        }
+    }
+    // Redirección de error
+    if (line->redirect_error){
+        error_fd = open(line->redirect_error, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
+        /* --- Crecking error while opening file --- */
+        if (error_fd == -1){
+            perror("open");
+            exit(EXIT_FAILURE);
+        }
+    }
+    // Fichero auxiliar
+    char* aux_file_name = "aux_file.ms";
+
+    int result = fg_multicommand_executer(line->ncommands, line->commands, input_fd, output_fd, error_fd, aux_file_name);
+    close(output_fd);
+    close(error_fd);
+    return result;
+}
+
+int fg_multicommand_executer(int command_counter, tcommand* command, int input_fd, int output_fd, int error_fd, char* aux_file_name){
+    int first = 1;
+    int despl = 0;
+    while (command_counter > 0){
+        int comunication_pipe[2];
+        pid_t pid;
+
+        /* --- PIPE CREATION --- */
+        if (pipe(comunication_pipe) == -1){
+            perror("pipe");
+            exit(EXIT_FAILURE);
+        }
+
+        /* --- FORK --- */
+        pid = fork();
+        if (pid < 0){
+            perror("fork");
+            exit(EXIT_FAILURE);
+        } else if (pid == 0){
+            // Cerrar extremo de lectura
+            close(comunication_pipe[0]);
+            // La entrada ya está siendo redirigida
+            if (!first){
+                input_fd = open(aux_file_name, O_RDONLY);
+                /* --- Crecking error while opening file --- */
+                if (input_fd == -1){
+                    perror("open");
+                    exit(EXIT_FAILURE);
+                }
+                dup2(input_fd, STDIN_FILENO);
+                close(input_fd);
+            } else{
+                dup2(input_fd, STDIN_FILENO);
+                close(input_fd);
+            }
+
+            // Redirigir salida siempre a pipe
+            if(dup2(comunication_pipe[1], STDOUT_FILENO) == -1){
+                perror("redir to pipe");
+                exit(EXIT_FAILURE);
+            }
+            close(comunication_pipe[1]);
+
+            // Redirigir preventivamente el error
+            dup2(error_fd, STDERR_FILENO);
+            close(error_fd);
+
+            char* destination = (command+despl)->filename;
+            char** argsv = (command+despl)->argv;
+            execv(destination, argsv);
+            // Si falla y error_fd != NULL escribir en el file asociado al descriptor de fichero
+            printf("execv: Bad address\n");
+            exit(EXIT_FAILURE);
+        } else{
+            waitpid(pid, NULL, 0);
+            // Cerrar el extremo de escritura
+            close(comunication_pipe[1]);
+            // Resetear la redirección de salida
+            int new_out_fd = dup(STDOUT_FILENO);
+            dup2(new_out_fd, STDOUT_FILENO);
+            close(new_out_fd);
+            // Abrir el fichero axiliar para la escritura
+            int aux_file_fd = open(aux_file_name, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+            if (aux_file_fd == -1){
+                perror("open");
+                exit(EXIT_FAILURE);
+            }
+
+            char buffer[128];
+            ssize_t bytesRead;
+            while ((bytesRead = read(comunication_pipe[0], buffer, sizeof(buffer))) > 0) {
+                // Procesando los datos leídos
+                if (command_counter == 1){
+                    write(output_fd, buffer, bytesRead);
+                } else{
+                    write(aux_file_fd, buffer, bytesRead);
+                }
+            }
+            close(aux_file_fd);
+            close(comunication_pipe[0]);
+            first = 0;
+            despl += 1;
+            command_counter -= 1;
+        }
+    }
+    return 0;
 }
