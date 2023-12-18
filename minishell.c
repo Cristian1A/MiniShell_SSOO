@@ -54,9 +54,18 @@ int fg_unicommand(tcommand* command, char* input, char* output, char* error);
 int fg_multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name);
 int InternOp(char* shell_line);
 int changeD(int counter, char** words);
+void SIGINT_handler(int sig);
+
+void SIGINT_handler(int sig){
+    printf("\n");
+}
 
 int main(int argc, char const *argv[])
 {
+    if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
+        perror("Error al registrar el manejador de señales\n");
+        return -1;
+    }
     char shell_line[MAX_LINE_SIZE]; tline* parsed_line; int shell_status = 0;
     while (!shell_status){
         /********************************/
