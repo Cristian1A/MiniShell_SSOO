@@ -43,6 +43,7 @@
 #define PROMPT "msh>"
 #define MAX_LINE_SIZE 1024
 #define FILE_DESCRIPTORS 3
+volatile sig_atomic_t contador_sigint = 0;
 
 // Compile with -> gcc -Wall minishell.c libparser.a -o minishell -static
 
@@ -57,17 +58,26 @@ int changeD(int counter, char** words);
 void SIGINT_handler(int sig);
 
 void SIGINT_handler(int sig){
-    printf("\n");
+    printf("\n%s", PROMPT);
+}
+
+void kill_son_handler(int sig){
+    ++contador_sigint;
+    exit(EXIT_SUCCESS);
 }
 
 int main(int argc, char const *argv[])
 {
-    if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
-        perror("Error al registrar el manejador de señales\n");
-        return -1;
-    }
     char shell_line[MAX_LINE_SIZE]; tline* parsed_line; int shell_status = 0;
     while (!shell_status){
+        /********************************/
+        /*             <0>              */
+        /*        SIGINT handling       */
+        /********************************/
+        if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
+            perror("Error al registrar el manejador de señales\n");
+            return -1;
+        }
         /********************************/
         /*             <0>              */
         /*        Resetting fds         */
@@ -151,6 +161,10 @@ int fg_unicommand(tcommand* command, char* input, char* output, char* error){
         perror("fork");
         exit(EXIT_FAILURE);
     } else if (pid == 0){
+        if (signal(SIGINT, kill_son_handler) == SIG_ERR) {
+            perror("Error al registrar el manejador de señales\n");
+            return -1;
+        }
         int input_fd; int output_fd; int error_fd;
         // Cerrar extremo de lectura
         close(comunication_pipe[0]);
@@ -259,6 +273,15 @@ int fg_multicommand_executer(int command_counter, tcommand* command, int input_f
             perror("fork");
             exit(EXIT_FAILURE);
         } else if (pid == 0){
+            if (signal(SIGINT, kill_son_handler) == SIG_ERR) {
+                perror("Error al registrar el manejador de señales\n");
+                return -1;
+            }
+            if (contador_sigint != 0){
+                contador_sigint = 0;
+                exit(EXIT_SUCCESS);
+            }
+            
             // Cerrar extremo de lectura
             close(comunication_pipe[0]);
             // La entrada ya está siendo redirigida
