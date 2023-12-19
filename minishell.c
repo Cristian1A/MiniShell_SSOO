@@ -43,6 +43,7 @@
 #define PROMPT "msh>"
 #define MAX_LINE_SIZE 1024
 #define FILE_DESCRIPTORS 3
+#define WORD_DELIMITER " "
 volatile sig_atomic_t contador_sigint = 0;
 
 // Compile with -> gcc -Wall minishell.c libparser.a -o minishell -static
@@ -53,7 +54,7 @@ int foreground_executer(tline* line);
 int fg_multicommand(tline* line);
 int fg_unicommand(tcommand* command, char* input, char* output, char* error);
 int fg_multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name);
-int InternOp(char* shell_line);
+int intern_command(char* shell_line);
 int changeD(int counter, char** words);
 void SIGINT_handler(int sig);
 
@@ -66,8 +67,7 @@ void kill_son_handler(int sig){
     exit(EXIT_SUCCESS);
 }
 
-int main(int argc, char const *argv[])
-{
+int main(int argc, char const *argv[]){
     char shell_line[MAX_LINE_SIZE]; tline* parsed_line; int shell_status = 0;
     while (!shell_status){
         /********************************/
@@ -75,7 +75,7 @@ int main(int argc, char const *argv[])
         /*        SIGINT handling       */
         /********************************/
         if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
-            perror("Error al registrar el manejador de señales\n");
+            perror("Signar handler\n");
             return -1;
         }
         /********************************/
@@ -100,21 +100,21 @@ int main(int argc, char const *argv[])
         /********************************/
         if(!fgets(shell_line, MAX_LINE_SIZE, stdin)){
             printf("The line cannot be read\n");
-            exit(-1);
+            exit(EXIT_FAILURE);
         }
-        if(InternOp(shell_line) == 2){
+
+        if(intern_command(shell_line) == 2){
             /********************************/
             /*             <3>              */
             /*   Analyze with the parser    */
             /********************************/
-        
             parsed_line = tokenize(shell_line);
             /********************************/
             /*             <4>              */
             /*     Execute the comands      */
             /********************************/
             shell_status = upper_executer(parsed_line);
-        }
+        }        
     }
     return shell_status;
 }
@@ -352,66 +352,35 @@ int fg_multicommand_executer(int command_counter, tcommand* command, int input_f
 }
 
 
-int InternOp(char* shell_line){
-    char miString[1024];
-    strcpy(miString, shell_line);
-    // Declarar un puntero a un array de strings para almacenar las palabras
-    char **miArray = NULL;
-
-    // Utilizar strtok para contar la cantidad de palabras en el string
-    char *token = strtok(miString, " ");
-    int numPalabras = 0;
-
-    while (token != NULL) {
-        numPalabras++;
-        token = strtok(NULL, " ");
+int intern_command(char* shell_line){
+    char* second_line = strdup(shell_line);
+    if (!second_line){
+        perror("strdup");
+        exit(EXIT_FAILURE);
     }
-
-    // Asignar memoria para el array de strings
-    miArray = (char **)malloc(numPalabras * sizeof(char *));
-
-    // Reiniciar el string para volver a utilizar strtok
-    strcpy(miString, shell_line);
-
-    // Utilizar strtok para almacenar cada palabra en el array de strings
-    token = strtok(miString, " ");
-    int indice = 0;
-
-    while (token != NULL) {
-        // Asignar memoria para la palabra y copiarla al array
-        miArray[indice] = strdup(token);
-
-        // Obtener la siguiente palabra
-        token = strtok(NULL, " ");
-
-        // Incrementar el índice
-        indice++;
-    }
-    if (strncmp(miArray[0], "cd", strlen(miArray[0])-1) == 0) {
-        changeD(numPalabras, miArray);
-    }else if(strncmp(miArray[0], "exit", strlen("exit")) == 0){
-        //printf("Saliendo con éxito\n");
-        exit(1);
-    }else{
-        //printf("No es una operación cd ni exit\n");
-        // Liberar la memoria asignada para cada palabra y el array de strings
-        for (int i = 0; i < numPalabras; i++) {
-            free(miArray[i]);
+    char* first_token = strtok(second_line, WORD_DELIMITER);
+    char* second_token = strtok(NULL, WORD_DELIMITER);
+    if (first_token != NULL){
+        /* --- CD --- */
+        if (strcmp(first_token, "cd\n\0") == 0){
+            printf("cd");
+        } /* --- EXIT --- */
+        else if (strcmp(first_token, "exit\n\0") == 0){
+            exit(EXIT_SUCCESS);
+        } /* --- FG --- */
+        else if (strcmp(first_token, "fg\n\0") == 0){
+            printf("fg");
+        } /* --- JOBS --- */
+        else if (strcmp(first_token, "jobs\n\0") == 0){
+            printf("jobs");
+        }/* --- UMASK --- */
+        else if (strcmp(first_token, "umask\n\0") == 0){
+            printf("umask");
         }
-        free(miArray);
-        return 2;
+    } else{
+        return 3; // -> Empty line
     }
-
-    // Liberar la memoria asignada para cada palabra y el array de strings
-    for (int i = 0; i < numPalabras; i++) {
-        free(miArray[i]);
-    }
-    
-    free(miArray);
-
-    //printf("------------------%s\n", miStringOriginal);
-
-    return 0;
+    return 2; // Try other command
 }
 
 int changeD(int counter, char** words){
