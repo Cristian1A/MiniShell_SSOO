@@ -39,6 +39,7 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <pwd.h>
 
 #define PROMPT "msh>"
 #define MAX_LINE_SIZE 1024
@@ -55,7 +56,7 @@ int fg_multicommand(tline* line);
 int fg_unicommand(tcommand* command, char* input, char* output, char* error);
 int fg_multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name);
 int intern_command(char* shell_line);
-int changeD(int counter, char** words);
+int change_cdir(char* new_path);
 void SIGINT_handler(int sig);
 
 void SIGINT_handler(int sig){
@@ -362,8 +363,8 @@ int intern_command(char* shell_line){
     char* second_token = strtok(NULL, WORD_DELIMITER);
     if (first_token != NULL){
         /* --- CD --- */
-        if (strcmp(first_token, "cd\n\0") == 0){
-            printf("cd");
+        if (strncmp(first_token, "cd\0", 2) == 0){
+            return change_cdir(second_token);
         } /* --- EXIT --- */
         else if (strcmp(first_token, "exit\n\0") == 0){
             exit(EXIT_SUCCESS);
@@ -383,43 +384,30 @@ int intern_command(char* shell_line){
     return 2; // Try other command
 }
 
-int changeD(int counter, char** words){
-    char *dir;
-	char buffer[512];
-	
-    printf( "El directorio ANTERIOR es: %s\n", getcwd(buffer, sizeof(buffer)));
-
-	if(counter > 2)
-	{
-	  fprintf(stderr, "Numero de argumentos inválido.\n");
-	  return 1;
-	}
-	
-	if (counter == 1)
-	{
-		dir = getenv("HOME");
-		if(dir == NULL)
-		{
-		  perror("No existe la variable $HOME\n");
-          return 1;
-		}
-	}
-	else 
-	{
-        //Elimina los saltos de línea del directorio al que se quiere cambiar
-        if (words[1][strlen(words[1]) - 1] == '\n') {
-        words[1][strlen(words[1]) - 1] = '\0';
+int change_cdir(char* new_path){
+    /* --- cd - no params --- */
+    if (new_path == NULL){
+        struct passwd *pw = getpwuid(getuid());
+        if (pw != NULL){
+            if (chdir(pw->pw_dir) != 0){
+                perror("chdir");
+                free(pw);
+                return -1; // Error
+            }
+            free(pw);
+            return 0;
         }
-		dir = words[1];
-	}
-	
-	// Comprobar si es un directorio
-	if (chdir(dir) != 0) {
-		perror("Error al cambiar de directorio\n");
-        printf( "El directorio actual es: %s\n", getcwd(buffer, sizeof(buffer)));
-        return 1;
+        free(pw);
+        return -1;
+    } else{
+        int string_size = strcspn(new_path, "\n");
+        memmove(new_path, new_path, string_size);
+        new_path[string_size] = '\0';
+        printf("%d\n", strcmp("/bin\0", new_path));
+        if (chdir(new_path) != 0){
+            perror("chdir");
+            return -1; // Error
+        }
     }
-	printf( "El directorio ACTUAL es: %s\n", getcwd(buffer, sizeof(buffer)));
-
-	return 0;
+    return -1;
 }
