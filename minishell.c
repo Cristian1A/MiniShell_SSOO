@@ -169,7 +169,6 @@ int main(int argc, char const *argv[]){
             printf("The line cannot be read\n");
             exit(EXIT_FAILURE);
         }
-
         if(intern_command(shell_line) == 2){
             /********************************/
             /*             <3>              */
@@ -268,7 +267,7 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
             input_fd = open(input, O_RDONLY);
             /* --- Crecking error while opening file --- */
             if (input_fd == -1){
-                perror("open");
+                perror("fichero: Error");
                 exit(EXIT_FAILURE);
             }
             dup2(input_fd, STDIN_FILENO);
@@ -279,7 +278,7 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
             output_fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
             /* --- Crecking error while opening file --- */
             if (output_fd == -1){
-                perror("open");
+                perror("fichero: Error");
                 exit(EXIT_FAILURE);
             }
             dup2(output_fd, STDOUT_FILENO);
@@ -290,14 +289,14 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
             error_fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
             /* --- Crecking error while opening file --- */
             if (error_fd == -1){
-                perror("open");
+                perror("fichero: Error");
                 exit(EXIT_FAILURE);
             }
             dup2(error_fd, STDERR_FILENO);
             close(error_fd);
         }
         execv(command->filename, command->argv);
-        printf("execv: Bad address\n");
+        printf("mandato: No se encuentra el mandato\n");
         exit(EXIT_FAILURE);
     } else{ /* -> PARENT PROCESS */
         if (background == 0){
@@ -339,7 +338,7 @@ int multicommand(tline* line){
         output_fd = open(line->redirect_output, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
         /* --- Crecking error while opening file --- */
         if (output_fd == -1){
-            perror("open");
+            perror("fichero: Error");
             exit(EXIT_FAILURE);
         }
     }
@@ -348,7 +347,7 @@ int multicommand(tline* line){
         error_fd = open(line->redirect_error, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
         /* --- Crecking error while opening file --- */
         if (error_fd == -1){
-            perror("open");
+            perror("fichero: Error");
             exit(EXIT_FAILURE);
         }
     }
@@ -403,7 +402,7 @@ int multicommand_executer(int command_counter, tcommand* command, int input_fd, 
                 input_fd = open(aux_file_name, O_RDONLY);
                 /* --- Crecking error while opening file --- */
                 if (input_fd == -1){
-                    perror("open");
+                    perror("fichero: Error");
                     exit(EXIT_FAILURE);
                 }
                 dup2(input_fd, STDIN_FILENO);
@@ -427,7 +426,7 @@ int multicommand_executer(int command_counter, tcommand* command, int input_fd, 
             destination = (command + despl)->filename;
             argsv = (command + despl)->argv;
             execv(destination, argsv);
-            printf("execv: Bad address\n");
+            printf("mandato: No se encuentra el mandato\n");
             exit(EXIT_FAILURE);
         } else{ /* -> PARENT PROCESS */
             waitpid(pid, NULL, 0);
@@ -464,7 +463,6 @@ int multicommand_executer(int command_counter, tcommand* command, int input_fd, 
     return 0;
 }
 
-
 int intern_command(char* shell_line){
     char* second_line = strdup(shell_line);
     if (!second_line){
@@ -486,12 +484,13 @@ int intern_command(char* shell_line){
         } /* --- JOBS --- */
         else if (strcmp(first_token, "jobs\n\0") == 0){
             return show_jobs();
-        }/* --- UMASK --- */
+        } /* --- UMASK --- */
         else if (strcmp(first_token, "umask\n\0") == 0){
             printf("umask");
+        } /* --- EMPTY LINE --- */
+        else if (strcmp(first_token, "\n\0") == 0){
+            return 3; // -> Empty line
         }
-    } else{
-        return 3; // -> Empty line
     }
     return 2; // Try other command
 }
