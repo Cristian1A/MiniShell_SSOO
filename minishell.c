@@ -93,19 +93,14 @@ struct Job {
 
 struct Job jobs[MAX_JOBS];
 int num_jobs = 0;
-volatile sig_atomic_t contador_sigint = 0;
+int sigint_received = 0;
 
 /*******************************/
 /*        SIGNAL HANDLERS      */
 /*******************************/
 
 void SIGINT_handler(int sig){
-    printf("\n%s", PROMPT);
-}
-
-void kill_son_handler(int sig){
-    ++contador_sigint;
-    exit(EXIT_SUCCESS);
+    sigint_received = 1;
 }
 
 void sigchld_handler(int signum) {
@@ -121,7 +116,7 @@ void sigchld_handler(int signum) {
             if (jobs[i].pid == child_pid) {
                 if (WIFEXITED(status)) {
                     printf("[%d] %s ha terminado. Estado: %d\n", i + 1, jobs[i].command, WEXITSTATUS(status));
-                } else if (WIFSIGNALED(status)) {
+                } else if (WIFSIGNALED(status)){
                     printf("[%d] %s ha terminado debido a la señal %d\n", i + 1, jobs[i].command, WTERMSIG(status));
                 }
                 break;
@@ -136,15 +131,16 @@ void sigchld_handler(int signum) {
 
 int main(int argc, char const *argv[]){
     char shell_line[MAX_LINE_SIZE]; tline* parsed_line; int shell_status = 0;
+    if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
+        perror("Signal handler\n");
+        return -1;
+    }
     while (!shell_status){
         /********************************/
         /*             <0>              */
         /*        SIGINT handling       */
         /********************************/
-        if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
-            perror("Signar handler\n");
-            return -1;
-        }
+        sigint_received = 0;
         /********************************/
         /*             <0>              */
         /*        Resetting fds         */
@@ -239,9 +235,11 @@ int foreground_executer(tline* line){
 }
 
 int unicommand(tcommand* command, char* input, char* output, int background, char* error){
-    signal(SIGCHLD, sigchld_handler);
     int comunication_pipe[2];
     pid_t pid;
+
+    /* --- SIGNAL HANDLING --- */
+    signal(SIGCHLD, sigchld_handler);
 
     /* --- PIPE CREATION --- */
     if (pipe(comunication_pipe) == -1){
@@ -254,12 +252,13 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
     if (pid < 0){
         perror("fork");
         exit(EXIT_FAILURE);
-    } else if (pid == 0){ /* -> CHILD PROCESS */
-        /*if (signal(SIGINT, kill_son_handler) == SIG_ERR) {
-            perror("Error al registrar el manejador de señales\n");
-            return -1;
-        }*/
+    } else if (pid == 0){
         int input_fd; int output_fd; int error_fd;
+        if (background){
+            signal(SIGINT, SIGINT_handler);
+        } else{
+            signal(SIGINT, SIG_DFL);
+        }
         /* --- Closing pipe for reading --- */
         close(comunication_pipe[0]);
         /* --- Input redirection --- */
@@ -295,12 +294,20 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
             dup2(error_fd, STDERR_FILENO);
             close(error_fd);
         }
+        if (!background && sigint_received){
+            sigint_received = 0;
+            exit(EXIT_FAILURE);
+        }
         execv(command->filename, command->argv);
         printf("mandato: No se encuentra el mandato\n");
         exit(EXIT_FAILURE);
     } else{ /* -> PARENT PROCESS */
         if (background == 0){
             waitpid(pid, NULL, 0);
+            int aux_df = dup(STDOUT_FILENO);
+            dup2(aux_df, STDOUT_FILENO);
+            close(aux_df);
+            printf("\n");
         } else if(background == 1){
             if (num_jobs < MAX_JOBS) {
                 jobs[num_jobs].pid = pid;
@@ -319,6 +326,11 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
 
 int multicommand(tline* line){
     signal(SIGCHLD, sigchld_handler);
+    if (line->background){
+        signal(SIGINT, SIGINT_handler);
+    } else{
+        signal(SIGINT, SIG_DFL);
+    }
     static int adder = 0;
     /* --- Default redirections --- */
     int input_fd = dup(STDIN_FILENO);
@@ -385,16 +397,6 @@ int multicommand_executer(int command_counter, tcommand* command, int input_fd, 
             perror("fork");
             exit(EXIT_FAILURE);
         } else if (pid == 0){ /* -> CHILD PROCESS */
-            /*
-            if (signal(SIGINT, kill_son_handler) == SIG_ERR) {
-                perror("Error al registrar el manejador de señales\n");
-                return -1;
-            }
-            if (contador_sigint != 0){
-                contador_sigint = 0;
-                exit(EXIT_SUCCESS);
-            }*/
-            
             /* --- Closing pipe for reading --- */
             close(comunication_pipe[0]);
             /* --- Input redirection --- */
