@@ -53,11 +53,10 @@
 int es_cadena_solo_espacios(char *cadena);
 void signalHandler(int signum);
 int upper_executer(tline* line);
-int background_executer(tline* line);
-int foreground_executer(tline* line, char* name);
-int fg_multicommand(tline* line);
-int fg_unicommand(tcommand* command, char* input, char* output, int background, char* error);
-int fg_multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name, int background);
+int executer(tline* line, char* name);
+int multicommand(tline* line);
+int unicommand(tcommand* command, char* input, char* output, int background, char* error);
+int multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name);
 int InternOp(char* shell_line);
 int changeD(int counter, char** words);
 int show_jobs();
@@ -136,7 +135,7 @@ int main(int argc, char const *argv[])
                 /*             <4>              */
                 /*     Execute the comands      */
                 /********************************/
-                shell_status = foreground_executer(parsed_line, shell_line);
+                shell_status = executer(parsed_line, shell_line);
             }   
         }
 
@@ -167,26 +166,47 @@ int es_cadena_solo_espacios(char *cadena) {
     printf("%s: No se encuentra el mandato\n", primeraPalabra);
     return 0;
 }*/
-int foreground_executer(tline* line, char* name){
-
-    /*if(line->commands->filename == NULL){
-        man_error(name);
-        return 0;
-    }*/
+int executer(tline* line, char* name){
     switch (line->ncommands){
     case 0:
         return -1;
         break;
     case 1:
-        return fg_unicommand(line->commands, line->redirect_input, line->redirect_output, line->background, line->redirect_error);
+        if(line->background){
+            pid_t pid;
+            pid = fork();
+            if (pid < 0){
+                perror("fork");
+                exit(EXIT_FAILURE);
+            }else if (pid == 0){
+                return unicommand(line->commands, line->redirect_input, line->redirect_output, line->background, line->redirect_error);
+            }else{
+                return 0;
+            }
+        }else{
+            return unicommand(line->commands, line->redirect_input, line->redirect_output, line->background, line->redirect_error);
+        }
         break;
     default:
-        return fg_multicommand(line);
+        if(line->background){
+            pid_t pid;
+            pid = fork();
+            if (pid < 0){
+                perror("fork");
+                exit(EXIT_FAILURE);
+            }else if (pid == 0){
+                return multicommand(line);
+            }else{
+                return 0;
+            }
+        }else{
+            return multicommand(line);
         break;
+        }
     }
 }
 
-int fg_unicommand(tcommand* command, char* input, char* output, int background, char* error){
+int unicommand(tcommand* command, char* input, char* output, int background, char* error){
     signal(SIGCHLD, sigchld_handler);
     int comunication_pipe[2];
     pid_t pid;
@@ -203,7 +223,6 @@ int fg_unicommand(tcommand* command, char* input, char* output, int background, 
         perror("fork");
         exit(EXIT_FAILURE);
     } else if (pid == 0){
-        setsid();
         int input_fd; int output_fd; int error_fd;
         // Cerrar extremo de lectura
         close(comunication_pipe[0]);
@@ -263,7 +282,8 @@ int fg_unicommand(tcommand* command, char* input, char* output, int background, 
         return 0;
     }
 }
-int fg_multicommand(tline* line){
+int multicommand(tline* line){
+    signal(SIGCHLD, sigchld_handler);
     static int sumador = 0;
     // Open redirection files
     int input_fd = dup(STDIN_FILENO);
@@ -303,25 +323,27 @@ int fg_multicommand(tline* line){
         sumador++;
     }
     sprintf(nombreArchivo, "archivo_%c.ms", FILE_INDENTIFICATOR+sumador);
-    int result = fg_multicommand_executer(line->ncommands, line->commands, input_fd, output_fd, error_fd, nombreArchivo, line->background);
+    int result = multicommand_executer(line->ncommands, line->commands, input_fd, output_fd, error_fd, nombreArchivo);
     close(output_fd);
     close(error_fd);
     return result;
 }
 
 
-int fg_multicommand_executer(int command_counter, tcommand* command, int input_fd, int output_fd, int error_fd, char* aux_file_name, int background){
+int multicommand_executer(int command_counter, tcommand* command, int input_fd, int output_fd, int error_fd, char* aux_file_name){
     int first = 1;
     int despl = 0;
     while (command_counter > 0){
         int comunication_pipe[2];
         pid_t pid;
 
+        /* --- PIPE CREATION --- */
         if (pipe(comunication_pipe) == -1){
             perror("pipe");
             exit(EXIT_FAILURE);
         }
 
+        /* --- FORK --- */
         pid = fork();
         if (pid < 0){
             perror("fork");
@@ -332,7 +354,7 @@ int fg_multicommand_executer(int command_counter, tcommand* command, int input_f
             // La entrada ya está siendo redirigida
             if (!first){
                 input_fd = open(aux_file_name, O_RDONLY);
-
+                /* --- Crecking error while opening file --- */
                 if (input_fd == -1){
                     perror("open");
                     exit(EXIT_FAILURE);
@@ -395,6 +417,7 @@ int fg_multicommand_executer(int command_counter, tcommand* command, int input_f
     }
     return 0;
 }
+
 
 /* --- Comprobador de instrucciones internas  --- */
 int InternOp(char* shell_line){
@@ -513,6 +536,3 @@ int changeD(int counter, char** words){
     }
     return 0;
 }*/
-    }
-    return -1;
-}
