@@ -71,17 +71,18 @@
 /*    FUNCTION DECLARATIONS    */
 /*******************************/
 
-int upper_executer(tline* line);
-int background_executer(tline* line);
-int foreground_executer(tline* line);
-int multicommand(tline* line);
-int unicommand(tcommand* command, char* input, char* output, int background, char* error);
-int multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name, int background);
+int upper_executer(tline* line, char* shell_line);
+int background_executer(tline* line, char* shell_line);
+int foreground_executer(tline* line, char* shell_line);
+int multicommand(tline* line, char* shell_line);
+int unicommand(tcommand* command, char* input, char* output, int background, char* error, char* command_name);
+int multicommand_executer(int command_counter, tcommand* command, int input_fd, int output_fd, int error_fd, char* aux_file_name);
 int intern_command(char* shell_line);
 int change_cdir(char* new_path);
 void SIGINT_handler(int sig);
 int create_job(int pidJob, char* commandJob);
 int show_jobs();
+
 /*******************************/
 /*           STRUCTS           */
 /********************************/
@@ -96,9 +97,13 @@ typedef struct Job{
 /*******************************/
 /*       GLOBAL VARIABLES      */
 /*******************************/
+
 Job jobs[MAX_JOBS];
 int num_jobs = 0;
-int sigint_received = 0;    
+int sigint_received = 0;
+key_t clave;	//Clave de acceso a la zona de memoria
+long int id;	//Identificador de la zona de memoria
+int *pmem = NULL;	//Puntero a la zona de memoria
 
 /*******************************/
 /*        SIGNAL HANDLERS      */
@@ -112,7 +117,6 @@ void sigchld_handler(int signum) {
     (void) signum;
     pid_t child_pid;
     int status;
-
     while ((child_pid = waitpid(-1, &status, WNOHANG)) > 0) {
         for (int i = 0; i < num_jobs; ++i) {
             if (jobs[i].pid == child_pid) {
@@ -127,35 +131,29 @@ void sigchld_handler(int signum) {
     }
 }
 
-key_t clave;	//Clave de acceso a la zona de memoria
-long int id;	//Identificador de la zona de memoria
-int *pmem = NULL;	//Puntero a la zona de memoria
-
-
 /*******************************/
 /*         MAIN FUNCTION       */
 /*******************************/
+
 int main(int argc, char const *argv[]){
     char shell_line[MAX_LINE_SIZE]; tline* parsed_line; int shell_status = 0;
-
-    //Creamos un área de memoria compartida
+    /* --- Creating shared memory area --- */
     char dir[50];
     getcwd(dir, 50);
-	clave=ftok(dir,33); //Cualquier fichero existente y cualquier int
-	id=shmget(clave,sizeof(int)*100,0777|IPC_CREAT);
-	pmem=(int *)shmat(id,(char *)0,0);
+	clave = ftok(dir, 33); //Cualquier fichero existente y cualquier int
+	id = shmget(clave, sizeof(int) * 100, 0777 | IPC_CREAT);
+	pmem = (int *) shmat(id, (char *)0, 0);
     pmem[5] = 0;
-
-    if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
-        perror("Signal handler\n");
-        return -1;
-    }
     while (!shell_status){
         /********************************/
         /*             <0>              */
         /*        SIGINT handling       */
         /********************************/
         sigint_received = 0;
+        if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
+            perror("Signal handler\n");
+            return -1;
+        }
         /********************************/
         /*             <0>              */
         /*        Resetting fds         */
@@ -190,21 +188,21 @@ int main(int argc, char const *argv[]){
             /*             <4>              */
             /*     Execute the comands      */
             /********************************/
-            shell_status = upper_executer(parsed_line);
+            shell_status = upper_executer(parsed_line, shell_line);
         }        
     }
     return shell_status;
 }
 
-int upper_executer(tline* line){
+int upper_executer(tline* line, char* shell_line){
     if (line->background){
-        return background_executer(line);
+        return background_executer(line, shell_line);
     } else{
-        return foreground_executer(line);
+        return foreground_executer(line, shell_line);
     }
 }
 
-int background_executer(tline* line){
+int background_executer(tline* line, char* shell_line){
     pid_t pid;
     switch (line->ncommands){
     case 0:
@@ -216,7 +214,7 @@ int background_executer(tline* line){
             perror("fork");
             exit(EXIT_FAILURE);
         } else if (pid == 0){ /* -> CHILD PROCESS */
-            return unicommand(line->commands, line->redirect_input, line->redirect_output, line->background, line->redirect_error);
+            return unicommand(line->commands, line->redirect_input, line->redirect_output, line->background, line->redirect_error, shell_line);
         } else{ /* -> PARENT PROCESS */
             return 0;
         }
@@ -227,7 +225,7 @@ int background_executer(tline* line){
             perror("fork");
             exit(EXIT_FAILURE);
         }else if (pid == 0){ /* -> CHILD PROCESS */
-            return multicommand(line);
+            return multicommand(line, shell_line);
         }else{ /* -> PARENT PROCESS */
             return 0;
         }
@@ -235,21 +233,26 @@ int background_executer(tline* line){
     }
 }
 
-int foreground_executer(tline* line){
+int foreground_executer(tline* line, char* shell_line){
+    char* first_token; int result;
     switch (line->ncommands){
     case 0:
         return -1;
         break;
     case 1:
-        return unicommand(line->commands, line->redirect_input, line->redirect_output, line->background, line->redirect_error);
+        first_token = strtok(shell_line, WORD_DELIMITER);
+        result = unicommand(line->commands, line->redirect_input, line->redirect_output, line->background, line->redirect_error, first_token);
+        //free(first_token);
+        return result;
         break;
     default:
-        return multicommand(line);
+        result = multicommand(line, shell_line);
+        return result;
         break;
     }
 }
 
-int unicommand(tcommand* command, char* input, char* output, int background, char* error){
+int unicommand(tcommand* command, char* input, char* output, int background, char* error, char* command_name){
     int comunication_pipe[2];
     pid_t pid;
 
@@ -283,7 +286,8 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
             input_fd = open(input, O_RDONLY);
             /* --- Crecking error while opening file --- */
             if (input_fd == -1){
-                perror("fichero: Error");
+                strcat(input, ": Error\n");
+                perror(input);
                 exit(EXIT_FAILURE);
             }
             dup2(input_fd, STDIN_FILENO);
@@ -294,7 +298,8 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
             output_fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
             /* --- Crecking error while opening file --- */
             if (output_fd == -1){
-                perror("fichero: Error");
+                strcat(output, ": Error\n");
+                perror(output);
                 exit(EXIT_FAILURE);
             }
             dup2(output_fd, STDOUT_FILENO);
@@ -303,9 +308,10 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
         /* --- Error redirection --- */
         if (error){
             error_fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
-            /* --- Crecking error while opening file --- */
+            /* --- Crecking error command_namewhile opening file --- */
             if (error_fd == -1){
-                perror("fichero: Error");
+                strcat(error, ": Error\n");
+                perror(error);
                 exit(EXIT_FAILURE);
             }
             dup2(error_fd, STDERR_FILENO);
@@ -316,7 +322,8 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
             exit(EXIT_FAILURE);
         }
         execv(command->filename, command->argv);
-        printf("mandato: No se encuentra el mandato\n");
+        strcat(command_name, ": No se encuentra el mandato\n");
+        perror(command_name);
         exit(EXIT_FAILURE);
     } else{ /* -> PARENT PROCESS */
         if (background == 0){
@@ -343,9 +350,9 @@ int create_job(int pidJob, char* commandJob){
     newJob.id = *pmem;
     jobs[*pmem] = newJob;
     printf("[%i] %i\n", *pmem, newJob.pid);
-    printf("valor antes: %i", *pmem);
+    printf("Valor antes: %i ", *pmem);
     *pmem = *pmem + 1;
-    printf("valor de num_jobs despues: %i\n", *pmem);
+    printf("Valor de num_jobs despues: %i\n", *pmem);
     return 0;
 }
 
@@ -358,10 +365,8 @@ int show_jobs(){
     return 0;
 }
 
-
-
-int multicommand(tline* line){
-    //signal(SIGCHLD, sigchld_handler);
+int multicommand(tline* line, char* shell_line){
+    signal(SIGCHLD, sigchld_handler);
     if (line->background){
         signal(SIGINT, SIGINT_handler);
     } else{
@@ -377,8 +382,9 @@ int multicommand(tline* line){
         input_fd = open(line->redirect_input, O_RDONLY);
         /* --- Crecking error while opening file --- */
         if (input_fd == -1){
-            perror("open");
-            exit(EXIT_FAILURE);
+            strcat(line->redirect_input, ": Error\n");
+            perror(line->redirect_input);
+            return -1;
         }
     }
     /* --- Output redirection --- */
@@ -386,8 +392,9 @@ int multicommand(tline* line){
         output_fd = open(line->redirect_output, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
         /* --- Crecking error while opening file --- */
         if (output_fd == -1){
-            perror("fichero: Error");
-            exit(EXIT_FAILURE);
+            strcat(line->redirect_output, ": Error\n");
+            perror(line->redirect_output);
+            return -1;
         }
     }
     /* --- Error redirection --- */
@@ -395,8 +402,9 @@ int multicommand(tline* line){
         error_fd = open(line->redirect_error, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
         /* --- Crecking error while opening file --- */
         if (error_fd == -1){
-            perror("fichero: Error");
-            exit(EXIT_FAILURE);
+            strcat(line->redirect_error, ": Error\n");
+            perror(line->redirect_error);
+            return -1;
         }
     }
     /* --- Auxiliary file --- */
@@ -407,13 +415,13 @@ int multicommand(tline* line){
     }
     sprintf(aux_file_name, "file_%c.ms", FILE_INDENTIFICATOR + adder);
 
-    int result = multicommand_executer(line->ncommands, line->commands, input_fd, output_fd, error_fd, aux_file_name, line->background);
+    int result = multicommand_executer(line->ncommands, line->commands, input_fd, output_fd, error_fd, aux_file_name);
     close(output_fd);
     close(error_fd);
     return result;
 }
 
-int multicommand_executer(int command_counter, tcommand* command, int input_fd, int output_fd, int error_fd, char* aux_file_name, int background){
+int multicommand_executer(int command_counter, tcommand* command, int input_fd, int output_fd, int error_fd, char* aux_file_name){
     int first = 1; int despl = 0;
     char* destination;
     char** argsv;
