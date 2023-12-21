@@ -39,6 +39,7 @@
 
 #include "parser.h"
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -81,6 +82,7 @@ int intern_command(char* shell_line);
 int change_cdir(char* new_path);
 void SIGINT_handler(int sig);
 int create_job(int pidJob, char* commandJob);
+int umask_func(char* new_mask);
 int show_jobs();
 
 /*******************************/
@@ -546,8 +548,8 @@ int intern_command(char* shell_line){
             show_jobs();
             return 0;
         } /* --- UMASK --- */
-        else if (strcmp(first_token, "umask\n\0") == 0){
-            printf("umask");
+        else if ((strncmp(first_token, "umask\0", 6) == 0) || (strncmp(first_token, "umask\n", 6) == 0)){
+            return umask_func(second_token);
         } /* --- EMPTY LINE --- */
         else if (strcmp(first_token, "\n\0") == 0){
             return 3; // -> Empty line
@@ -581,4 +583,32 @@ int change_cdir(char* new_path){
         printf("%s\n", getcwd(new_cwd, sizeof(new_cwd)));
     }
     return -1;
+}
+
+int umask_func(char* new_mask){
+    mode_t aux_mask; int mask_str_len;
+    /* --- Umask execution without parameter --- */
+    if (new_mask == NULL){
+        aux_mask = umask(0);
+        printf("%d\n", aux_mask);
+        umask(aux_mask);
+    } else{ /* --- Umask execution with parameter --- */
+        mask_str_len = strlen(new_mask);
+        if (mask_str_len != 5){
+            printf("Invalid parameter\n");
+            return -1;
+        }
+        /* --- Checking if all new_mask's characters are in octal --- */
+        for (int i = 0; i < mask_str_len - 1; i++){
+            if (new_mask[i] < '0' && new_mask[i] > '7'){
+                printf("Invalid parameter\n");
+                return -1;
+            }
+        }
+        aux_mask = atoi(new_mask);
+        printf("%d\n", aux_mask);
+        umask(aux_mask);
+        printf("Applied new umask value\n");
+    }
+    return 0;
 }
