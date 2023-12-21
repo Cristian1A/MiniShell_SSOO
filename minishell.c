@@ -49,6 +49,7 @@
 #include <signal.h>
 #include <pwd.h>
 #include <ctype.h>
+#include <semaphore.h>
 
 /*******************************/
 /*        CONSTANT VALUES      */
@@ -66,20 +67,6 @@
 #define JOBS_IDENTIFICATOR 0
 
 /*******************************/
-/*    FUNCTION DECLARATIONS    */
-/*******************************/
-
-int upper_executer(tline* line);
-int background_executer(tline* line);
-int foreground_executer(tline* line);
-int multicommand(tline* line);
-int unicommand(tcommand* command, char* input, char* output, int background, char* error);
-int multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name, int background);
-int intern_command(char* shell_line);
-int change_cdir(char* new_path);
-int show_jobs();
-void SIGINT_handler(int sig);
-/*******************************/
 /*           STRUCTS           */
 /********************************/
 
@@ -92,11 +79,27 @@ typedef struct{
 /*******************************/
 /*       GLOBAL VARIABLES      */
 /*******************************/
-struct Job jobs[MAX_JOBS];
-int num_jobs = 0;
 
+Job* jobs[MAX_JOBS];
+sem_t sem;
+volatile int num_jobs = 0;
+
+/*******************************/
+/*    FUNCTION DECLARATIONS    */
+/*******************************/
+
+int upper_executer(tline* line);
+int background_executer(tline* line);
+int foreground_executer(tline* line);
+int multicommand(tline* line);
+int unicommand(tcommand* command, char* input, char* output, int background, char* error);
+int multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name, int background);
+int intern_command(char* shell_line);
+int change_cdir(char* new_path);
+int show_jobs();
 int create_job(int pidJob, char* commandJob);
-int addJob(Job job_to_add);
+int addJob(Job* job_to_add);
+void SIGINT_handler(int sig);
 
 int sigint_received = 0;    
 
@@ -108,25 +111,6 @@ void SIGINT_handler(int sig){
     sigint_received = 1;
 }
 
-/*void sigchld_handler(int signum) {
-    (void) signum;
-    pid_t child_pid;
-    int status;
-
-    while ((child_pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        for (int i = 0; i < num_jobs; ++i) {
-            if (jobs[i].pid == child_pid) {
-                if (WIFEXITED(status)) {
-                    strcpy(jobs[i].state, "Hecho");
-                    num_jobs--;
-                } else {
-                    strcpy(jobs[i].state, "En ejecución");
-                }
-            }
-        }
-    }
-}*/
-
 
 /*******************************/
 /*         MAIN FUNCTION       */
@@ -137,6 +121,7 @@ int main(int argc, char const *argv[]){
         perror("Signal handler\n");
         return -1;
     }
+    sem_init(&sem, 0, 1);
     while (!shell_status){
         /********************************/
         /*             <0>              */
@@ -319,35 +304,49 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
     }
 }
 
+int add_new_job(int job_pid, char* command){
+    sem_wait(&sem);
+    
+
+
+    //jobs[num_jobs++] = job;
+    sem_post(&sem);
+}
 
 int create_job(int pidJob, char* commandJob){
-    struct Job newJob;  
-    newJob.pid = pidJob;
-    strcpy(newJob.command, commandJob); 
-    newJob.id = num_jobs;
-    addJob(newJob);
+    Job* new_job = (Job*) malloc(sizeof(Job));
+    new_job->pid = pidJob;
+    strcpy(new_job->command, commandJob);
+    sem_wait(&sem);
+    new_job->id = num_jobs;
+    sem_post(&sem);
+    addJob(new_job);
     return 0;
 }
 
-int addJob(Job job_to_add){
+int addJob(Job* job_to_add){
+    sem_wait(&sem);
     jobs[num_jobs] = job_to_add;
-    num_jobs++;
+    ++num_jobs;
+    printf("%d", num_jobs);
+    sem_post(&sem);
     return 0;
 };
 
 int show_jobs(){
+    sem_wait(&sem);
+    printf("%d\n", num_jobs);
     for (int i = 0; i < num_jobs; ++i) {
-        int state_v = kill(jobs[i].id, 0);
+        int state_v = kill(jobs[i]->id, 0);
         if(state_v == 0){
-            printf("[%i] Hecho            %s\n", jobs[i].id, jobs[i].command);
-        }else if(state_v == -1 && errno == ESRCH){
-            printf("[%i] En ejecución     %s\n", jobs[i].id, jobs[i].command);
+            printf("[%i] Hecho            %s\n", jobs[i]->id, jobs[i]->command);
+        }else if((state_v == -1) && (errno == ESRCH)){
+            printf("[%i] En ejecución     %s\n", jobs[i]->id, jobs[i]->command);
         }        
     }
+    sem_post(&sem);
     return 0;
 }
-
-
 
 int multicommand(tline* line){
     //signal(SIGCHLD, sigchld_handler);
@@ -408,8 +407,7 @@ int multicommand_executer(int command_counter, tcommand* command, int input_fd, 
     char** argsv;
     while (command_counter > 0){
         int comunication_pipe[2];
-        pid_t pid;    addJob(newJob);
-
+        pid_t pid;
 
         /* --- PIPE CREATION --- */
         if (pipe(comunication_pipe) == -1){
@@ -518,12 +516,14 @@ int intern_command(char* shell_line){
             return change_cdir(second_token);
         } /* --- EXIT --- */
         else if (strcmp(first_token, "exit\n\0") == 0){
+            sem_destroy(&sem);
             exit(EXIT_SUCCESS);
         } /* --- FG --- */
         else if (strcmp(first_token, "fg\n\0") == 0){
             printf("fg");
         } /* --- JOBS --- */
         else if (strcmp(first_token, "jobs\n\0") == 0){
+            printf("HA LLEGADO AL JOBS\n");
             return show_jobs();
         } /* --- UMASK --- */
         else if (strcmp(first_token, "umask\n\0") == 0){
@@ -561,8 +561,4 @@ int change_cdir(char* new_path){
         printf("%s\n", getcwd(new_cwd, sizeof(new_cwd)));
     }
     return -1;
-}
-
-
-    return 0;
 }
