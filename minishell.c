@@ -39,6 +39,7 @@
 
 #include "parser.h"
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -75,7 +76,9 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
 int multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name);
 int intern_command(char* shell_line);
 int change_cdir(char* new_path);
+int exit_func();
 int show_jobs();
+int umask_func(char* new_mask);
 void SIGINT_handler(int sig);
 
 /*******************************/
@@ -165,7 +168,10 @@ int main(int argc, char const *argv[]){
             printf("The line cannot be read\n");
             exit(EXIT_FAILURE);
         }
-        if(intern_command(shell_line) == 2){
+        int int_res = intern_command(shell_line);
+        //printf("%d\n", int_res);
+        if(int_res == 2){
+            printf("PASSING HERE\n");
             /********************************/
             /*             <3>              */
             /*   Analyze with the parser    */
@@ -479,7 +485,7 @@ int intern_command(char* shell_line){
             return change_cdir(second_token);
         } /* --- EXIT --- */
         else if (strcmp(first_token, "exit\n\0") == 0){
-            exit(EXIT_SUCCESS);
+            return exit_func();
         } /* --- FG --- */
         else if (strcmp(first_token, "fg\n\0") == 0){
             printf("fg");
@@ -487,8 +493,8 @@ int intern_command(char* shell_line){
         else if (strcmp(first_token, "jobs\n\0") == 0){
             return show_jobs();
         } /* --- UMASK --- */
-        else if (strcmp(first_token, "umask\n\0") == 0){
-            printf("umask");
+        else if ((strncmp(first_token, "umask\0", 6) == 0) || (strncmp(first_token, "umask\n", 6) == 0)){
+            return umask_func(second_token);
         } /* --- EMPTY LINE --- */
         else if (strcmp(first_token, "\n\0") == 0){
             return 3; // -> Empty line
@@ -524,7 +530,38 @@ int change_cdir(char* new_path){
     return -1;
 }
 
+int exit_func(){
+    exit(EXIT_SUCCESS);
+}
 
 int show_jobs(){
+    return 0;
+}
+
+int umask_func(char* new_mask){
+    mode_t aux_mask; int mask_str_len;
+    /* --- Umask execution without parameter --- */
+    if (new_mask == NULL){
+        aux_mask = umask(0);
+        printf("%d\n", aux_mask);
+        umask(aux_mask);
+    } else{ /* --- Umask execution with parameter --- */
+        mask_str_len = strlen(new_mask);
+        if (mask_str_len != 5){
+            printf("Invalid parameter\n");
+            return -1;
+        }
+        /* --- Checking if all new_mask's characters are in octal --- */
+        for (int i = 0; i < mask_str_len - 1; i++){
+            if (new_mask[i] < '0' && new_mask[i] > '7'){
+                printf("Invalid parameter\n");
+                return -1;
+            }
+        }
+        aux_mask = atoi(new_mask);
+        printf("%d\n", aux_mask);
+        umask(aux_mask);
+        printf("Applied new umask value\n");
+    }
     return 0;
 }
