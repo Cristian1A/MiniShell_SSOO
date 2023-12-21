@@ -39,7 +39,6 @@
 
 #include "parser.h"
 #include <sys/types.h>
-#include <sys/stat.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -50,11 +49,8 @@
 #include <signal.h>
 #include <pwd.h>
 #include <ctype.h>
-<<<<<<< HEAD
-=======
 #include <sys/mman.h>
 #include <sys/shm.h>
->>>>>>> refs/remotes/origin/Cristian
 
 /*******************************/
 /*        CONSTANT VALUES      */
@@ -64,18 +60,12 @@
 #define MAX_LINE_SIZE 1024
 #define REDUCED_LINE_SIZE 256
 #define SUPER_REDUCED_LINE_SIZE 128
-<<<<<<< HEAD
-=======
 #define HIPER_SUPER_REDUCED_LINE_SIZE 16
->>>>>>> refs/remotes/origin/Cristian
 #define FILE_DESCRIPTORS 3
 #define WORD_DELIMITER " "
 #define MAX_JOBS 15
 #define FILE_INDENTIFICATOR 'A'
-<<<<<<< HEAD
-=======
 #define JOBS_IDENTIFICATOR 0
->>>>>>> refs/remotes/origin/Cristian
 
 /*******************************/
 /*    FUNCTION DECLARATIONS    */
@@ -86,16 +76,9 @@ int background_executer(tline* line, char* shell_line);
 int foreground_executer(tline* line, char* shell_line);
 int multicommand(tline* line, char* shell_line);
 int unicommand(tcommand* command, char* input, char* output, int background, char* error, char* command_name);
-<<<<<<< HEAD
-int multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name);
-=======
 int multicommand_executer(int command_counter, tcommand* command, int input_fd, int output_fd, int error_fd, char* aux_file_name);
->>>>>>> refs/remotes/origin/Cristian
 int intern_command(char* shell_line);
 int change_cdir(char* new_path);
-int exit_func();
-int show_jobs();
-int umask_func(char* new_mask);
 void SIGINT_handler(int sig);
 int create_job(int pidJob, char* commandJob);
 int show_jobs();
@@ -126,50 +109,11 @@ int *pmem = NULL;	//Puntero a la zona de memoria
 /*        SIGNAL HANDLERS      */
 /*******************************/
 
-/*******************************/
-/*           STRUCTS           */
-/*******************************/
-
-struct Job {
-    pid_t pid;
-    char command[REDUCED_LINE_SIZE];
-};
-
-/*******************************/
-/*       GLOBAL VARIABLES      */
-/*******************************/
-
-struct Job jobs[MAX_JOBS];
-int num_jobs = 0;
-int sigint_received = 0;
-
-/*******************************/
-/*        SIGNAL HANDLERS      */
-/*******************************/
-
 void SIGINT_handler(int sig){
     sigint_received = 1;
 }
 
 void sigchld_handler(int signum) {
-<<<<<<< HEAD
-    /* --- Used to avoid unused parameter warning --- */
-    (void) signum;
-    pid_t child_pid;
-    int status;
-
-    /* --- Waiting to all the childs which have changed their state to be handled --- */
-    while ((child_pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        /* --- Seeking job associated to child's pid --- */
-        for (int i = 0; i < num_jobs; ++i) {
-            if (jobs[i].pid == child_pid) {
-                if (WIFEXITED(status)) {
-                    printf("[%d] %s ha terminado. Estado: %d\n", i + 1, jobs[i].command, WEXITSTATUS(status));
-                } else if (WIFSIGNALED(status)){
-                    printf("[%d] %s ha terminado debido a la señal %d\n", i + 1, jobs[i].command, WTERMSIG(status));
-                }
-                break;
-=======
     (void) signum;
     pid_t child_pid;
     int status;
@@ -182,7 +126,6 @@ void sigchld_handler(int signum) {
                 } else {
                     strcpy(jobs[i].state, "En ejecución");
                 }
->>>>>>> refs/remotes/origin/Cristian
             }
         }
     }
@@ -194,9 +137,6 @@ void sigchld_handler(int signum) {
 
 int main(int argc, char const *argv[]){
     char shell_line[MAX_LINE_SIZE]; tline* parsed_line; int shell_status = 0;
-<<<<<<< HEAD
-    while (1){
-=======
     /* --- Creating shared memory area --- */
     char dir[50];
     getcwd(dir, 50);
@@ -205,17 +145,12 @@ int main(int argc, char const *argv[]){
 	pmem = (int *) shmat(id, (char *)0, 0);
     pmem[5] = 0;
     while (!shell_status){
->>>>>>> refs/remotes/origin/Cristian
         /********************************/
         /*             <0>              */
         /*        SIGINT handling       */
         /********************************/
         sigint_received = 0;
-<<<<<<< HEAD
-            if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
-=======
         if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
->>>>>>> refs/remotes/origin/Cristian
             perror("Signal handler\n");
             return -1;
         }
@@ -243,13 +178,7 @@ int main(int argc, char const *argv[]){
             printf("The line cannot be read\n");
             exit(EXIT_FAILURE);
         }
-<<<<<<< HEAD
-        int int_res = intern_command(shell_line);
-        //printf("%d\n", int_res);
-        if(int_res == 2){
-=======
         if(intern_command(shell_line) == 2){
->>>>>>> refs/remotes/origin/Cristian
             /********************************/
             /*             <3>              */
             /*   Analyze with the parser    */
@@ -328,13 +257,9 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
     pid_t pid;
 
     /* --- SIGNAL HANDLING --- */
-<<<<<<< HEAD
-    signal(SIGCHLD, sigchld_handler);
-=======
     if(background){
         signal(SIGCHLD, sigchld_handler);
     }
->>>>>>> refs/remotes/origin/Cristian
 
     /* --- PIPE CREATION --- */
     if (pipe(comunication_pipe) == -1){
@@ -403,22 +328,6 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
     } else{ /* -> PARENT PROCESS */
         if (background == 0){
             waitpid(pid, NULL, 0);
-<<<<<<< HEAD
-            int aux_df = dup(STDOUT_FILENO);
-            dup2(aux_df, STDOUT_FILENO);
-            close(aux_df);
-            printf("\n");
-        } else if(background == 1){
-            if (num_jobs < MAX_JOBS) {
-                jobs[num_jobs].pid = pid;
-                strcpy(jobs[num_jobs].command, command->filename);
-                printf("[%d] %i\n", num_jobs + 1, pid);
-                num_jobs++;
-            } else {
-                printf("Max number of jobs executing in background was reached\n");
-            }
-        }
-=======
         }else{
             create_job(getpid(), command->filename);
             shmdt((char *)id); //Desconecta el segmento de memoria compartida
@@ -428,15 +337,12 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
         dup2(aux_df, STDOUT_FILENO);
         printf("\n");
         close(aux_df);
->>>>>>> refs/remotes/origin/Cristian
         close(comunication_pipe[1]);
         close(comunication_pipe[0]);
         return 0;
     }
 }
 
-<<<<<<< HEAD
-=======
 int create_job(int pidJob, char* commandJob){
     struct Job newJob;  
     newJob.pid = pidJob;
@@ -459,7 +365,6 @@ int show_jobs(){
     return 0;
 }
 
->>>>>>> refs/remotes/origin/Cristian
 int multicommand(tline* line, char* shell_line){
     signal(SIGCHLD, sigchld_handler);
     if (line->background){
@@ -571,8 +476,6 @@ int multicommand_executer(int command_counter, tcommand* command, int input_fd, 
             printf("mandato: No se encuentra el mandato\n");
             exit(EXIT_FAILURE);
         } else{ /* -> PARENT PROCESS */
-<<<<<<< HEAD
-=======
             /*if(background){
                 num_jobs++;
                 if (num_jobs < MAX_JOBS) {
@@ -586,7 +489,6 @@ int multicommand_executer(int command_counter, tcommand* command, int input_fd, 
                     printf("Max number of jobs executing in background was reached\n");
                 }
             }*/
->>>>>>> refs/remotes/origin/Cristian
             waitpid(pid, NULL, 0);
             /* --- Closing pipe for writing --- */
             close(comunication_pipe[1]);
@@ -635,24 +537,17 @@ int intern_command(char* shell_line){
             return change_cdir(second_token);
         } /* --- EXIT --- */
         else if (strcmp(first_token, "exit\n\0") == 0){
-            return exit_func();
+            exit(EXIT_SUCCESS);
         } /* --- FG --- */
         else if (strcmp(first_token, "fg\n\0") == 0){
             printf("fg");
         } /* --- JOBS --- */
         else if (strcmp(first_token, "jobs\n\0") == 0){
-<<<<<<< HEAD
-            return show_jobs();
-        } /* --- UMASK --- */
-        else if ((strncmp(first_token, "umask\0", 6) == 0) || (strncmp(first_token, "umask\n", 6) == 0)){
-            return umask_func(second_token);
-=======
             show_jobs();
             return 0;
         } /* --- UMASK --- */
         else if (strcmp(first_token, "umask\n\0") == 0){
             printf("umask");
->>>>>>> refs/remotes/origin/Cristian
         } /* --- EMPTY LINE --- */
         else if (strcmp(first_token, "\n\0") == 0){
             return 3; // -> Empty line
@@ -686,40 +581,4 @@ int change_cdir(char* new_path){
         printf("%s\n", getcwd(new_cwd, sizeof(new_cwd)));
     }
     return -1;
-}
-
-int exit_func(){
-    exit(EXIT_SUCCESS);
-}
-
-int show_jobs(){
-    return 0;
-}
-
-int umask_func(char* new_mask){
-    mode_t aux_mask; int mask_str_len;
-    /* --- Umask execution without parameter --- */
-    if (new_mask == NULL){
-        aux_mask = umask(0);
-        printf("%d\n", aux_mask);
-        umask(aux_mask);
-    } else{ /* --- Umask execution with parameter --- */
-        mask_str_len = strlen(new_mask);
-        if (mask_str_len != 5){
-            printf("Invalid parameter\n");
-            return -1;
-        }
-        /* --- Checking if all new_mask's characters are in octal --- */
-        for (int i = 0; i < mask_str_len - 1; i++){
-            if (new_mask[i] < '0' && new_mask[i] > '7'){
-                printf("Invalid parameter\n");
-                return -1;
-            }
-        }
-        aux_mask = atoi(new_mask);
-        printf("%d\n", aux_mask);
-        umask(aux_mask);
-        printf("Applied new umask value\n");
-    }
-    return 0;
 }
