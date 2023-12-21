@@ -21,13 +21,21 @@
                 /*<<<<<<<<<<<<<---->>>>>>>>>>>>>*/
 
 
-/*              	1) Display the promt                        */
+/*              	1) Display the prompt                       */
 /*                                                              */
 /*              	2) Read a line from stdin                   */
 /*                                                              */
 /*              	3) Analyze that line with the parser        */
 /*                                                              */
-/*              	4) Execute the comands of the line          */
+/*              	4) Execute the commands of the line         */
+
+
+// Compile with -> gcc -Wall minishell.c libparser.a -o minishell -static
+
+
+/*******************************/
+/*           LIBRARIES         */
+/*******************************/
 
 #include "parser.h"
 #include <sys/types.h>
@@ -39,65 +47,115 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <pwd.h>
 #include <ctype.h>
+#include <sys/mman.h>
+#include <sys/shm.h>
+
+/*******************************/
+/*        CONSTANT VALUES      */
+/*******************************/
 
 #define PROMPT "msh>"
 #define MAX_LINE_SIZE 1024
+#define REDUCED_LINE_SIZE 256
+#define SUPER_REDUCED_LINE_SIZE 128
+#define HIPER_SUPER_REDUCED_LINE_SIZE 16
 #define FILE_DESCRIPTORS 3
+#define WORD_DELIMITER " "
 #define MAX_JOBS 15
 #define FILE_INDENTIFICATOR 'A'
+#define JOBS_IDENTIFICATOR 0
 
+/*******************************/
+/*    FUNCTION DECLARATIONS    */
+/*******************************/
 
-// Compile with -> gcc -Wall minishell.c libparser.a -o minishell -static
-
-int es_cadena_solo_espacios(char *cadena);
-void signalHandler(int signum);
 int upper_executer(tline* line);
-int executer(tline* line, char* name);
+int background_executer(tline* line);
+int foreground_executer(tline* line);
 int multicommand(tline* line);
 int unicommand(tcommand* command, char* input, char* output, int background, char* error);
-int multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name);
-int InternOp(char* shell_line);
-int changeD(int counter, char** words);
+int multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name, int background);
+int intern_command(char* shell_line);
+int change_cdir(char* new_path);
+void SIGINT_handler(int sig);
+int create_job(int pidJob, char* commandJob);
 int show_jobs();
+/*******************************/
+/*           STRUCTS           */
+/********************************/
 
-struct Job {
+typedef struct Job{
     pid_t pid;
-    char command[256];
-};
+    char command[SUPER_REDUCED_LINE_SIZE];
+    int id;
+    char state[HIPER_SUPER_REDUCED_LINE_SIZE];
+} Job;
 
-struct Job jobs[MAX_JOBS];
-int num_jobs = 0; 
+/*******************************/
+/*       GLOBAL VARIABLES      */
+/*******************************/
+Job jobs[MAX_JOBS];
+int num_jobs = 0;
+int sigint_received = 0;    
+
+/*******************************/
+/*        SIGNAL HANDLERS      */
+/*******************************/
+
+void SIGINT_handler(int sig){
+    sigint_received = 1;
+}
 
 void sigchld_handler(int signum) {
-    (void)signum;  // Para evitar la advertencia de "unused parameter"
+    (void) signum;
     pid_t child_pid;
     int status;
 
-    // Esperar a que todos los hijos que han cambiado de estado sean manejados
     while ((child_pid = waitpid(-1, &status, WNOHANG)) > 0) {
-        // Buscar el trabajo correspondiente al pid del hijo
         for (int i = 0; i < num_jobs; ++i) {
             if (jobs[i].pid == child_pid) {
                 if (WIFEXITED(status)) {
-                    printf("[%d] %s ha terminado. Estado: %d\n", i + 1, jobs[i].command, WEXITSTATUS(status));
-                } else if (WIFSIGNALED(status)) {
-                    printf("[%d] %s ha terminado debido a la señal %d\n", i + 1, jobs[i].command, WTERMSIG(status));
+                    strcpy(jobs[i].state, "Hecho");
+                    num_jobs--;
+                } else {
+                    strcpy(jobs[i].state, "En ejecución");
                 }
-                // Eliminar el trabajo de la lista (si es necesario)
-                // Aquí puedes hacer cualquier otra acción que desees
-                // por ejemplo, marcarlo como terminado, etc.
-                break;
             }
         }
     }
 }
 
-int main(int argc, char const *argv[])
-{
+key_t clave;	//Clave de acceso a la zona de memoria
+long int id;	//Identificador de la zona de memoria
+int *pmem = NULL;	//Puntero a la zona de memoria
+
+
+/*******************************/
+/*         MAIN FUNCTION       */
+/*******************************/
+int main(int argc, char const *argv[]){
     char shell_line[MAX_LINE_SIZE]; tline* parsed_line; int shell_status = 0;
 
+    //Creamos un área de memoria compartida
+    char dir[50];
+    getcwd(dir, 50);
+	clave=ftok(dir,33); //Cualquier fichero existente y cualquier int
+	id=shmget(clave,sizeof(int)*100,0777|IPC_CREAT);
+	pmem=(int *)shmat(id,(char *)0,0);
+    pmem[5] = 0;
+
+    if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
+        perror("Signal handler\n");
+        return -1;
+    }
     while (!shell_status){
+        /********************************/
+        /*             <0>              */
+        /*        SIGINT handling       */
+        /********************************/
+        sigint_received = 0;
         /********************************/
         /*             <0>              */
         /*        Resetting fds         */
@@ -120,96 +178,85 @@ int main(int argc, char const *argv[])
         /********************************/
         if(!fgets(shell_line, MAX_LINE_SIZE, stdin)){
             printf("The line cannot be read\n");
-            exit(-1);
+            exit(EXIT_FAILURE);
         }
-
-        if(es_cadena_solo_espacios(shell_line) != 1){
-            if(InternOp(shell_line) == 2){
-                /********************************/
-                /*             <3>              */
-                /*   Analyze with the parser    */
-                /********************************/
-
-                parsed_line = tokenize(shell_line);
-                /********************************/
-                /*             <4>              */
-                /*     Execute the comands      */
-                /********************************/
-                shell_status = executer(parsed_line, shell_line);
-            }   
-        }
-
+        if(intern_command(shell_line) == 2){
+            /********************************/
+            /*             <3>              */
+            /*   Analyze with the parser    */
+            /********************************/
+            parsed_line = tokenize(shell_line);
+            /********************************/
+            /*             <4>              */
+            /*     Execute the comands      */
+            /********************************/
+            shell_status = upper_executer(parsed_line);
+        }        
     }
     return shell_status;
 }
 
-int es_cadena_solo_espacios(char *cadena) {
-    while (*cadena) {
-        if (!isspace((unsigned char)*cadena)) {
-            return 0;  // La cadena contiene al menos un carácter que no es un espacio en blanco
-        }
-        cadena++;
+int upper_executer(tline* line){
+    if (line->background){
+        return background_executer(line);
+    } else{
+        return foreground_executer(line);
     }
-    return 1;  // La cadena está formada solo por espacios en blanco
 }
 
-/*int man_error(char* phrase){    
-    char* primeraPalabra;
-    // Utilizar strtok para obtener la primera palabra
-    char* token = strtok(phrase, " ");
-
-    // Verificar si se obtuvo la primera palabra
-    if (token != NULL) {
-        // Crear una copia de la palabra para devolverla
-        primeraPalabra = strdup(token);
-    }
-    printf("%s: No se encuentra el mandato\n", primeraPalabra);
-    return 0;
-}*/
-int executer(tline* line, char* name){
+int background_executer(tline* line){
+    pid_t pid;
     switch (line->ncommands){
     case 0:
         return -1;
         break;
     case 1:
-        if(line->background){
-            pid_t pid;
-            pid = fork();
-            if (pid < 0){
-                perror("fork");
-                exit(EXIT_FAILURE);
-            }else if (pid == 0){
-                return unicommand(line->commands, line->redirect_input, line->redirect_output, line->background, line->redirect_error);
-            }else{
-                return 0;
-            }
-        }else{
+        pid = fork();
+        if (pid < 0){ /* -> FORK ERROR */
+            perror("fork");
+            exit(EXIT_FAILURE);
+        } else if (pid == 0){ /* -> CHILD PROCESS */
             return unicommand(line->commands, line->redirect_input, line->redirect_output, line->background, line->redirect_error);
+        } else{ /* -> PARENT PROCESS */
+            return 0;
         }
         break;
     default:
-        if(line->background){
-            pid_t pid;
-            pid = fork();
-            if (pid < 0){
-                perror("fork");
-                exit(EXIT_FAILURE);
-            }else if (pid == 0){
-                return multicommand(line);
-            }else{
-                return 0;
-            }
-        }else{
+        pid = fork();
+        if (pid < 0){  /* -> FORK ERROR */
+            perror("fork");
+            exit(EXIT_FAILURE);
+        }else if (pid == 0){ /* -> CHILD PROCESS */
             return multicommand(line);
-        break;
+        }else{ /* -> PARENT PROCESS */
+            return 0;
         }
+        break;
+    }
+}
+
+int foreground_executer(tline* line){
+    switch (line->ncommands){
+    case 0:
+        return -1;
+        break;
+    case 1:
+        return unicommand(line->commands, line->redirect_input, line->redirect_output, line->background, line->redirect_error);
+        break;
+    default:
+        return multicommand(line);
+        break;
     }
 }
 
 int unicommand(tcommand* command, char* input, char* output, int background, char* error){
-    signal(SIGCHLD, sigchld_handler);
     int comunication_pipe[2];
     pid_t pid;
+
+    /* --- SIGNAL HANDLING --- */
+    if(background){
+        signal(SIGCHLD, sigchld_handler);
+    }
 
     /* --- PIPE CREATION --- */
     if (pipe(comunication_pipe) == -1){
@@ -224,72 +271,108 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
         exit(EXIT_FAILURE);
     } else if (pid == 0){
         int input_fd; int output_fd; int error_fd;
-        // Cerrar extremo de lectura
+        if (background){
+            signal(SIGINT, SIGINT_handler);
+        } else{
+            signal(SIGINT, SIG_DFL);
+        }
+        /* --- Closing pipe for reading --- */
         close(comunication_pipe[0]);
-        // Redirección de entrada
+        /* --- Input redirection --- */
         if (input){
             input_fd = open(input, O_RDONLY);
             /* --- Crecking error while opening file --- */
             if (input_fd == -1){
-                perror("open");
+                perror("fichero: Error");
                 exit(EXIT_FAILURE);
             }
             dup2(input_fd, STDIN_FILENO);
             close(input_fd);
         }
-        // Redirección de salida
+        /* --- Output redirection --- */
         if (output){
             output_fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
             /* --- Crecking error while opening file --- */
             if (output_fd == -1){
-                perror("open");
+                perror("fichero: Error");
                 exit(EXIT_FAILURE);
             }
             dup2(output_fd, STDOUT_FILENO);
             close(output_fd);
         }
-        // Redirección de error
+        /* --- Error redirection --- */
         if (error){
             error_fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
             /* --- Crecking error while opening file --- */
             if (error_fd == -1){
-                perror("open");
+                perror("fichero: Error");
                 exit(EXIT_FAILURE);
             }
             dup2(error_fd, STDERR_FILENO);
             close(error_fd);
         }
-
-        execv(command->filename, command->argv);
-        // Si falla y error_fd != NULL escribir en el file asociado al descriptor de fichero
-        printf("execv: Bad address\n");
-        exit(EXIT_FAILURE);
-    } else{
-        if(background == 0){
-            waitpid(pid, NULL, 0);
-        }else if(background == 1){
-            if (num_jobs < MAX_JOBS) {
-                jobs[num_jobs].pid = pid;
-                strcpy(jobs[num_jobs].command, command->filename);
-                printf("[%d] %i\n", num_jobs + 1, pid);
-                num_jobs++;
-            } else {
-                printf("Número máximo de trabajos en segundo plano alcanzado.\n");
-            }
+        if (!background && sigint_received){
+            sigint_received = 0;
+            exit(EXIT_FAILURE);
         }
+        execv(command->filename, command->argv);
+        printf("mandato: No se encuentra el mandato\n");
+        exit(EXIT_FAILURE);
+    } else{ /* -> PARENT PROCESS */
+        if (background == 0){
+            waitpid(pid, NULL, 0);
+        }else{
+            create_job(getpid(), command->filename);
+            shmdt((char *)id); //Desconecta el segmento de memoria compartida
+		    shmctl(id,IPC_RMID,0); //Elimina el segmento de memoria compartida
+        }
+        int aux_df = dup(STDOUT_FILENO);
+        dup2(aux_df, STDOUT_FILENO);
+        printf("\n");
+        close(aux_df);
         close(comunication_pipe[1]);
         close(comunication_pipe[0]);
         return 0;
     }
 }
+
+int create_job(int pidJob, char* commandJob){
+    struct Job newJob;  
+    newJob.pid = pidJob;
+    strcpy(newJob.command, commandJob); 
+    newJob.id = *pmem;
+    jobs[*pmem] = newJob;
+    printf("[%i] %i\n", *pmem, newJob.pid);
+    printf("valor antes: %i", *pmem);
+    *pmem = *pmem + 1;
+    printf("valor de num_jobs despues: %i\n", *pmem);
+    return 0;
+}
+
+int show_jobs(){
+    printf("mostrando jobs ");
+    printf("%i\n", *pmem);
+    for (int i = 0; i < *pmem; ++i) {
+        printf("[%i] %s        %s\n", jobs[i].id, jobs[i].state, jobs[i].command);
+    }
+    return 0;
+}
+
+
+
 int multicommand(tline* line){
-    signal(SIGCHLD, sigchld_handler);
-    static int sumador = 0;
-    // Open redirection files
+    //signal(SIGCHLD, sigchld_handler);
+    if (line->background){
+        signal(SIGINT, SIGINT_handler);
+    } else{
+        signal(SIGINT, SIG_DFL);
+    }
+    static int adder = 0;
+    /* --- Default redirections --- */
     int input_fd = dup(STDIN_FILENO);
     int output_fd = dup(STDOUT_FILENO);
     int error_fd = dup(STDERR_FILENO);
-    // Redirección de entrada
+    /* --- Input redirection --- */
     if (line->redirect_input){
         input_fd = open(line->redirect_input, O_RDONLY);
         /* --- Crecking error while opening file --- */
@@ -298,44 +381,46 @@ int multicommand(tline* line){
             exit(EXIT_FAILURE);
         }
     }
-    // Redirección de salida
+    /* --- Output redirection --- */
     if (line->redirect_output){
         output_fd = open(line->redirect_output, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
         /* --- Crecking error while opening file --- */
         if (output_fd == -1){
-            perror("open");
+            perror("fichero: Error");
             exit(EXIT_FAILURE);
         }
     }
-    // Redirección de error
+    /* --- Error redirection --- */
     if (line->redirect_error){
         error_fd = open(line->redirect_error, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
         /* --- Crecking error while opening file --- */
         if (error_fd == -1){
-            perror("open");
+            perror("fichero: Error");
             exit(EXIT_FAILURE);
         }
     }
-    // Fichero auxiliar
-    char nombreArchivo[20];  // Ajusta el tamaño según tus necesidades
-    // Construir el nombre del archivo
+    /* --- Auxiliary file --- */
+    char aux_file_name[SUPER_REDUCED_LINE_SIZE];
+    /* --- Generating file name --- */
     if(line->background){
-        sumador++;
+        adder++;
     }
-    sprintf(nombreArchivo, "archivo_%c.ms", FILE_INDENTIFICATOR+sumador);
-    int result = multicommand_executer(line->ncommands, line->commands, input_fd, output_fd, error_fd, nombreArchivo);
+    sprintf(aux_file_name, "file_%c.ms", FILE_INDENTIFICATOR + adder);
+
+    int result = multicommand_executer(line->ncommands, line->commands, input_fd, output_fd, error_fd, aux_file_name, line->background);
     close(output_fd);
     close(error_fd);
     return result;
 }
 
-
-int multicommand_executer(int command_counter, tcommand* command, int input_fd, int output_fd, int error_fd, char* aux_file_name){
-    int first = 1;
-    int despl = 0;
+int multicommand_executer(int command_counter, tcommand* command, int input_fd, int output_fd, int error_fd, char* aux_file_name, int background){
+    int first = 1; int despl = 0;
+    char* destination;
+    char** argsv;
     while (command_counter > 0){
         int comunication_pipe[2];
         pid_t pid;
+
 
         /* --- PIPE CREATION --- */
         if (pipe(comunication_pipe) == -1){
@@ -345,18 +430,18 @@ int multicommand_executer(int command_counter, tcommand* command, int input_fd, 
 
         /* --- FORK --- */
         pid = fork();
-        if (pid < 0){
+        if (pid < 0){ /* -> FORK ERROR */
             perror("fork");
             exit(EXIT_FAILURE);
-        } else if (pid == 0){
-            // Cerrar extremo de lectura
+        } else if (pid == 0){ /* -> CHILD PROCESS */
+            /* --- Closing pipe for reading --- */
             close(comunication_pipe[0]);
-            // La entrada ya está siendo redirigida
+            /* --- Input redirection --- */
             if (!first){
                 input_fd = open(aux_file_name, O_RDONLY);
                 /* --- Crecking error while opening file --- */
                 if (input_fd == -1){
-                    perror("open");
+                    perror("fichero: Error");
                     exit(EXIT_FAILURE);
                 }
                 dup2(input_fd, STDIN_FILENO);
@@ -366,41 +451,53 @@ int multicommand_executer(int command_counter, tcommand* command, int input_fd, 
                 close(input_fd);
             }
 
-            // Redirigir salida siempre a pipe
+            /* --- Output redirection to pipe --- */
             if(dup2(comunication_pipe[1], STDOUT_FILENO) == -1){
                 perror("redir to pipe");
                 exit(EXIT_FAILURE);
             }
             close(comunication_pipe[1]);
 
-            // Redirigir preventivamente el error
+            /* --- Error redirection --- */
             dup2(error_fd, STDERR_FILENO);
             close(error_fd);
 
-            char* destination = (command+despl)->filename;
-            char** argsv = (command+despl)->argv;
+            destination = (command + despl)->filename;
+            argsv = (command + despl)->argv;
             execv(destination, argsv);
-            // Si falla y error_fd != NULL escribir en el file asociado al descriptor de fichero
-            printf("execv: Bad address\n");
+            printf("mandato: No se encuentra el mandato\n");
             exit(EXIT_FAILURE);
-        } else{
+        } else{ /* -> PARENT PROCESS */
+            /*if(background){
+                num_jobs++;
+                if (num_jobs < MAX_JOBS) {
+                    jobs[num_jobs].pid = getpid();
+                    jobs[num_jobs].id = JOBS_IDENTIFICATOR+num_jobs;
+                    strcpy(jobs[num_jobs].command, command->filename);
+                    printf("[%d] %i\n", num_jobs + 1, pid);
+                    num_jobs++;
+                    waitpid(pid, NULL, 0);
+                } else {
+                    printf("Max number of jobs executing in background was reached\n");
+                }
+            }*/
             waitpid(pid, NULL, 0);
-            // Cerrar el extremo de escritura
+            /* --- Closing pipe for writing --- */
             close(comunication_pipe[1]);
-            // Resetear la redirección de salida
+            /* --- Resetting output redirection --- */
             int new_out_fd = dup(STDOUT_FILENO);
             dup2(new_out_fd, STDOUT_FILENO);
             close(new_out_fd);
-            // Abrir el fichero axiliar para la escritura
+            /* --- Opening auxiliary file for writing --- */
             int aux_file_fd = open(aux_file_name, O_WRONLY | O_CREAT | O_TRUNC, 0666);
             if (aux_file_fd == -1){
                 perror("open");
                 exit(EXIT_FAILURE);
             }
 
-            char buffer[128];
+            char buffer[SUPER_REDUCED_LINE_SIZE];
             ssize_t bytesRead;
-            while ((bytesRead = read(comunication_pipe[0], buffer, sizeof(buffer))) > 0) {
+            while ((bytesRead = read(comunication_pipe[0], buffer, sizeof(buffer))) > 0){
                 // Procesando los datos leídos
                 if (command_counter == 1){
                     write(output_fd, buffer, bytesRead);
@@ -418,121 +515,62 @@ int multicommand_executer(int command_counter, tcommand* command, int input_fd, 
     return 0;
 }
 
-
-/* --- Comprobador de instrucciones internas  --- */
-int InternOp(char* shell_line){
-    char *miString = strdup(shell_line);
-    if (miString == NULL) {
-        perror("Error al duplicar la cadena");
+int intern_command(char* shell_line){
+    char* second_line = strdup(shell_line);
+    if (!second_line){
+        perror("strdup");
         exit(EXIT_FAILURE);
     }
-    // Declarar un puntero a un array de strings para almacenar las palabras
-    char **miArray = NULL;
-
-    // Contar la cantidad de palabras en myString
-    char *token = strtok(miString, " ");
-    int numPalabras = 0;
-
-    while (token != NULL) {
-        numPalabras++;
-        token = strtok(NULL, " ");
-    }
-
-    // Asignar memoria para el array de strings
-    miArray = (char **)malloc(numPalabras * sizeof(char *));
-    if (miArray == NULL) {
-        perror("Error al asignar memoria");
-        free(miString);  // Liberar la memoria de miString antes de salir
-        exit(EXIT_FAILURE);
-    }
-
-    // Reiniciar el string para volver a utilizar strtok
-    strcpy(miString, shell_line);
-
-    // Almacenar cada palabra en el array de strings
-    token = strtok(miString, " ");
-    int indice = 0;
-
-    while (token != NULL) {
-        // Asignar memoria para la palabra y copiarla al array
-        miArray[indice] = strdup(token);    
-
-        // Obtener la siguiente palabra
-        token = strtok(NULL, " ");
-
-        indice++;
-    }
-
-    /* --- Filtrar instrucciones internas --- */
-    if (strncmp(miArray[0], "cd\n", 3) == 0 || strncmp(miArray[0], "cd\0", 3) == 0) {
-        changeD(numPalabras, miArray);
-    }else if(strncmp(miArray[0], "exit\n", strlen("exit\n")) == 0){
-        exit(1);
-    }/*else if(strncmp(miArray[0], "jobs", strlen("jobs")) == 0){
-        show_jobs();
-    }*/else{
-        // Liberar la memoria asignada para cada palabra y el array de strings
-        for (int i = 0; i < numPalabras; i++) {
-            free(miArray[i]);
+    char* first_token = strtok(second_line, WORD_DELIMITER);
+    char* second_token = strtok(NULL, WORD_DELIMITER);
+    if (first_token != NULL){
+        /* --- CD --- */
+        if ((strncmp(first_token, "cd\0", 3) == 0) || (strncmp(first_token, "cd\n", 3) == 0)){
+            return change_cdir(second_token);
+        } /* --- EXIT --- */
+        else if (strcmp(first_token, "exit\n\0") == 0){
+            exit(EXIT_SUCCESS);
+        } /* --- FG --- */
+        else if (strcmp(first_token, "fg\n\0") == 0){
+            printf("fg");
+        } /* --- JOBS --- */
+        else if (strcmp(first_token, "jobs\n\0") == 0){
+            show_jobs();
+            return 0;
+        } /* --- UMASK --- */
+        else if (strcmp(first_token, "umask\n\0") == 0){
+            printf("umask");
+        } /* --- EMPTY LINE --- */
+        else if (strcmp(first_token, "\n\0") == 0){
+            return 3; // -> Empty line
         }
-        free(miArray);
-        free(miString);
-        return 2;
     }
-
-    // Liberar la memoria asignada para cada palabra y el array de strings
-    for (int i = 0; i < numPalabras; i++) {
-        free(miArray[i]);
-    }
-    
-    free(miArray);
-    free(miString);
-
-    return 0;
+    return 2; // Try other command
 }
 
-/* --- Cambiar directorio --- */
-int changeD(int counter, char** words){
-    char *dir;
-	char buffer[512];
-	
-	if(counter > 2)
-	{
-	  fprintf(stderr, "cd: demasiados argumentos\n");
-	  return 1;
-	}
-	
-	if (counter == 1)
-	{
-		dir = getenv("HOME");
-        if(dir == NULL)
-		{
-		  fprintf(stderr, "cd: No existe la variable $HOME\n");
-          return 1;
-		}
-	}
-	else 
-	{
-        if (words[1][strlen(words[1]) - 1] == '\n') {
-        words[1][strlen(words[1]) - 1] = '\0';
+int change_cdir(char* new_path){
+    char new_cwd[MAX_LINE_SIZE];
+    /* --- cd - no params --- */
+    if (new_path == NULL){
+        struct passwd *pw = getpwuid(getuid());
+        if (pw != NULL){
+            if (chdir(pw->pw_dir) != 0){
+                perror("chdir");
+                return -1; // Error
+            }
+            printf("%s\n", getcwd(new_cwd, sizeof(new_cwd)));
+            return 0;
         }
-		dir = words[1];
-	}
-	
-	// Comprobar si es un directorio
-	if (chdir(dir) != 0) {
-		printf("cd: %s: No exite el archivo o el directorio\n", dir);
-        return 1;
+        return -1;
+    } else{
+        int string_size = strcspn(new_path, "\n");
+        memmove(new_path, new_path, string_size);
+        new_path[string_size] = '\0';
+        if (chdir(new_path) != 0){
+            perror("chdir");
+            return -1; // Error
+        }
+        printf("%s\n", getcwd(new_cwd, sizeof(new_cwd)));
     }
-	printf( "%s\n", getcwd(buffer, sizeof(buffer)));
-
-	return 0;
+    return -1;
 }
-
-/*int show_jobs(){
-    //checkear los estado de cada proceso en background
-    for (int i = 0; i < num_jobs; i++) {
-        printf("[%d]                   %s\n", i + 1, jobs[i].command);
-    }
-    return 0;
-}*/
