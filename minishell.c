@@ -68,11 +68,11 @@
 /*    FUNCTION DECLARATIONS    */
 /*******************************/
 
-int upper_executer(tline* line);
-int background_executer(tline* line);
-int foreground_executer(tline* line);
-int multicommand(tline* line);
-int unicommand(tcommand* command, char* input, char* output, int background, char* error);
+int upper_executer(tline* line, char* shell_line);
+int background_executer(tline* line, char* shell_line);
+int foreground_executer(tline* line, char* shell_line);
+int multicommand(tline* line, char* shell_line);
+int unicommand(tcommand* command, char* input, char* output, int background, char* error, char* command_name);
 int multicommand_executer(int command_counter, tcommand *command, int input_fd, int output_fd, int error_fd, char *aux_file_name);
 int intern_command(char* shell_line);
 int change_cdir(char* new_path);
@@ -134,16 +134,16 @@ void sigchld_handler(int signum) {
 
 int main(int argc, char const *argv[]){
     char shell_line[MAX_LINE_SIZE]; tline* parsed_line; int shell_status = 0;
-    if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
-        perror("Signal handler\n");
-        return -1;
-    }
-    while (!shell_status){
+    while (1){
         /********************************/
         /*             <0>              */
         /*        SIGINT handling       */
         /********************************/
         sigint_received = 0;
+            if (signal(SIGINT, SIGINT_handler) == SIG_ERR) {
+            perror("Signal handler\n");
+            return -1;
+        }
         /********************************/
         /*             <0>              */
         /*        Resetting fds         */
@@ -171,7 +171,6 @@ int main(int argc, char const *argv[]){
         int int_res = intern_command(shell_line);
         //printf("%d\n", int_res);
         if(int_res == 2){
-            printf("PASSING HERE\n");
             /********************************/
             /*             <3>              */
             /*   Analyze with the parser    */
@@ -181,21 +180,21 @@ int main(int argc, char const *argv[]){
             /*             <4>              */
             /*     Execute the comands      */
             /********************************/
-            shell_status = upper_executer(parsed_line);
+            shell_status = upper_executer(parsed_line, shell_line);
         }        
     }
     return shell_status;
 }
 
-int upper_executer(tline* line){
+int upper_executer(tline* line, char* shell_line){
     if (line->background){
-        return background_executer(line);
+        return background_executer(line, shell_line);
     } else{
-        return foreground_executer(line);
+        return foreground_executer(line, shell_line);
     }
 }
 
-int background_executer(tline* line){
+int background_executer(tline* line, char* shell_line){
     pid_t pid;
     switch (line->ncommands){
     case 0:
@@ -207,7 +206,7 @@ int background_executer(tline* line){
             perror("fork");
             exit(EXIT_FAILURE);
         } else if (pid == 0){ /* -> CHILD PROCESS */
-            return unicommand(line->commands, line->redirect_input, line->redirect_output, line->background, line->redirect_error);
+            return unicommand(line->commands, line->redirect_input, line->redirect_output, line->background, line->redirect_error, shell_line);
         } else{ /* -> PARENT PROCESS */
             return 0;
         }
@@ -218,7 +217,7 @@ int background_executer(tline* line){
             perror("fork");
             exit(EXIT_FAILURE);
         }else if (pid == 0){ /* -> CHILD PROCESS */
-            return multicommand(line);
+            return multicommand(line, shell_line);
         }else{ /* -> PARENT PROCESS */
             return 0;
         }
@@ -226,21 +225,26 @@ int background_executer(tline* line){
     }
 }
 
-int foreground_executer(tline* line){
+int foreground_executer(tline* line, char* shell_line){
+    char* first_token; int result;
     switch (line->ncommands){
     case 0:
         return -1;
         break;
     case 1:
-        return unicommand(line->commands, line->redirect_input, line->redirect_output, line->background, line->redirect_error);
+        first_token = strtok(shell_line, WORD_DELIMITER);
+        result = unicommand(line->commands, line->redirect_input, line->redirect_output, line->background, line->redirect_error, first_token);
+        //free(first_token);
+        return result;
         break;
     default:
-        return multicommand(line);
+        result = multicommand(line, shell_line);
+        return result;
         break;
     }
 }
 
-int unicommand(tcommand* command, char* input, char* output, int background, char* error){
+int unicommand(tcommand* command, char* input, char* output, int background, char* error, char* command_name){
     int comunication_pipe[2];
     pid_t pid;
 
@@ -272,7 +276,8 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
             input_fd = open(input, O_RDONLY);
             /* --- Crecking error while opening file --- */
             if (input_fd == -1){
-                perror("fichero: Error");
+                strcat(input, ": Error\n");
+                perror(input);
                 exit(EXIT_FAILURE);
             }
             dup2(input_fd, STDIN_FILENO);
@@ -283,7 +288,8 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
             output_fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
             /* --- Crecking error while opening file --- */
             if (output_fd == -1){
-                perror("fichero: Error");
+                strcat(output, ": Error\n");
+                perror(output);
                 exit(EXIT_FAILURE);
             }
             dup2(output_fd, STDOUT_FILENO);
@@ -292,9 +298,10 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
         /* --- Error redirection --- */
         if (error){
             error_fd = open(output, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
-            /* --- Crecking error while opening file --- */
+            /* --- Crecking error command_namewhile opening file --- */
             if (error_fd == -1){
-                perror("fichero: Error");
+                strcat(error, ": Error\n");
+                perror(error);
                 exit(EXIT_FAILURE);
             }
             dup2(error_fd, STDERR_FILENO);
@@ -305,7 +312,8 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
             exit(EXIT_FAILURE);
         }
         execv(command->filename, command->argv);
-        printf("mandato: No se encuentra el mandato\n");
+        strcat(command_name, ": No se encuentra el mandato\n");
+        perror(command_name);
         exit(EXIT_FAILURE);
     } else{ /* -> PARENT PROCESS */
         if (background == 0){
@@ -330,7 +338,7 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
     }
 }
 
-int multicommand(tline* line){
+int multicommand(tline* line, char* shell_line){
     signal(SIGCHLD, sigchld_handler);
     if (line->background){
         signal(SIGINT, SIGINT_handler);
@@ -347,8 +355,9 @@ int multicommand(tline* line){
         input_fd = open(line->redirect_input, O_RDONLY);
         /* --- Crecking error while opening file --- */
         if (input_fd == -1){
-            perror("open");
-            exit(EXIT_FAILURE);
+            strcat(line->redirect_input, ": Error\n");
+            perror(line->redirect_input);
+            return -1;
         }
     }
     /* --- Output redirection --- */
@@ -356,8 +365,9 @@ int multicommand(tline* line){
         output_fd = open(line->redirect_output, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
         /* --- Crecking error while opening file --- */
         if (output_fd == -1){
-            perror("fichero: Error");
-            exit(EXIT_FAILURE);
+            strcat(line->redirect_output, ": Error\n");
+            perror(line->redirect_output);
+            return -1;
         }
     }
     /* --- Error redirection --- */
@@ -365,8 +375,9 @@ int multicommand(tline* line){
         error_fd = open(line->redirect_error, O_WRONLY | O_CREAT | O_TRUNC, 0666); 
         /* --- Crecking error while opening file --- */
         if (error_fd == -1){
-            perror("fichero: Error");
-            exit(EXIT_FAILURE);
+            strcat(line->redirect_error, ": Error\n");
+            perror(line->redirect_error);
+            return -1;
         }
     }
     /* --- Auxiliary file --- */
