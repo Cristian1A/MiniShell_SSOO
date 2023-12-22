@@ -257,6 +257,7 @@ int foreground_executer(tline* line, char* shell_line){
 int unicommand(tcommand* command, char* input, char* output, int background, char* error, char* command_name){
     int comunication_pipe[2];
     pid_t pid;
+    int aux_df;
 
     /* --- SIGNAL HANDLING --- */
     if(background){
@@ -335,7 +336,7 @@ int unicommand(tcommand* command, char* input, char* output, int background, cha
             shmdt((char *)id); //Desconecta el segmento de memoria compartida
 		    shmctl(id,IPC_RMID,0); //Elimina el segmento de memoria compartida
         }
-        int aux_df = dup(STDOUT_FILENO);
+        aux_df = dup(STDOUT_FILENO);
         dup2(aux_df, STDOUT_FILENO);
         printf("\n");
         close(aux_df);
@@ -368,17 +369,24 @@ int show_jobs(){
 }
 
 int multicommand(tline* line, char* shell_line){
+    /* --- Default redirections --- */
+    int input_fd = dup(STDIN_FILENO);
+    int output_fd = dup(STDOUT_FILENO);
+    int error_fd = dup(STDERR_FILENO);
+
+    /* --- Auxiliary file --- */
+    char aux_file_name[SUPER_REDUCED_LINE_SIZE];
+
+    static int adder = 0;
+    int result;
+
     signal(SIGCHLD, sigchld_handler);
     if (line->background){
         signal(SIGINT, SIGINT_handler);
     } else{
         signal(SIGINT, SIG_DFL);
     }
-    static int adder = 0;
-    /* --- Default redirections --- */
-    int input_fd = dup(STDIN_FILENO);
-    int output_fd = dup(STDOUT_FILENO);
-    int error_fd = dup(STDERR_FILENO);
+    
     /* --- Input redirection --- */
     if (line->redirect_input){
         input_fd = open(line->redirect_input, O_RDONLY);
@@ -409,15 +417,13 @@ int multicommand(tline* line, char* shell_line){
             return -1;
         }
     }
-    /* --- Auxiliary file --- */
-    char aux_file_name[SUPER_REDUCED_LINE_SIZE];
     /* --- Generating file name --- */
     if(line->background){
         adder++;
     }
     sprintf(aux_file_name, "file_%c.ms", FILE_INDENTIFICATOR + adder);
 
-    int result = multicommand_executer(line->ncommands, line->commands, input_fd, output_fd, error_fd, aux_file_name);
+    result = multicommand_executer(line->ncommands, line->commands, input_fd, output_fd, error_fd, aux_file_name);
     close(output_fd);
     close(error_fd);
     return result;
@@ -478,19 +484,6 @@ int multicommand_executer(int command_counter, tcommand* command, int input_fd, 
             printf("mandato: No se encuentra el mandato\n");
             exit(EXIT_FAILURE);
         } else{ /* -> PARENT PROCESS */
-            /*if(background){
-                num_jobs++;
-                if (num_jobs < MAX_JOBS) {
-                    jobs[num_jobs].pid = getpid();
-                    jobs[num_jobs].id = JOBS_IDENTIFICATOR+num_jobs;
-                    strcpy(jobs[num_jobs].command, command->filename);
-                    printf("[%d] %i\n", num_jobs + 1, pid);
-                    num_jobs++;
-                    waitpid(pid, NULL, 0);
-                } else {
-                    printf("Max number of jobs executing in background was reached\n");
-                }
-            }*/
             waitpid(pid, NULL, 0);
             /* --- Closing pipe for writing --- */
             close(comunication_pipe[1]);
@@ -560,9 +553,11 @@ int intern_command(char* shell_line){
 
 int change_cdir(char* new_path){
     char new_cwd[MAX_LINE_SIZE];
+    struct passwd *pw;
+    int string_size;
     /* --- cd - no params --- */
     if (new_path == NULL){
-        struct passwd *pw = getpwuid(getuid());
+        pw = getpwuid(getuid());
         if (pw != NULL){
             if (chdir(pw->pw_dir) != 0){
                 perror("chdir");
@@ -573,7 +568,7 @@ int change_cdir(char* new_path){
         }
         return -1;
     } else{
-        int string_size = strcspn(new_path, "\n");
+        string_size = strcspn(new_path, "\n");
         memmove(new_path, new_path, string_size);
         new_path[string_size] = '\0';
         if (chdir(new_path) != 0){
